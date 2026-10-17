@@ -29,6 +29,27 @@ export interface PlayerRegisteredEvent {
   botsEnabled: boolean;
 }
 
+export interface ArenaSlotSummary {
+  slotId: number;
+  connected: boolean;
+  isBot: boolean;
+  name: string;
+  status: 'empty' | 'waiting' | 'ready' | 'playing' | 'eliminated';
+  score: number;
+  apples: number;
+  goldenApples: number;
+  alive: boolean;
+}
+
+export interface ArenaSnapshotEvent {
+  type: 'ARENA_SNAPSHOT';
+  roomId: string;
+  timestamp: number;
+  slots: ArenaSlotSummary[];
+  botsEnabled: boolean;
+  activeCountdown: number | null;
+}
+
 export type NetworkEventCallback = (payload: unknown) => void;
 
 export class ArenaNetworkClient {
@@ -188,6 +209,18 @@ export class ArenaNetworkClient {
         break;
       }
 
+      case 'ARENA_SNAPSHOT':
+        this.emit('arena_snapshot', data);
+        break;
+
+      case 'ROOM_STATUS':
+        this.emit('room_status', data);
+        break;
+
+      case 'HIGH_SCORES_SYNC':
+        this.emit('high_scores_sync', data.scores);
+        break;
+
       case 'COUNTDOWN_TICK':
         this.emit('countdown_tick', data.count);
         break;
@@ -209,6 +242,50 @@ export class ArenaNetworkClient {
         this.emit(data.type, data);
         break;
     }
+  }
+
+  public setPlayerName(name: string): void {
+    if (name && name.trim()) {
+      this.playerName = name.trim().slice(0, 16);
+    }
+  }
+
+  public submitHighScore(entry: Record<string, unknown>): void {
+    this.send({
+      type: 'SUBMIT_HIGH_SCORE',
+      roomId: this.roomId,
+      entry
+    });
+  }
+
+  public clearHighScores(): void {
+    this.send({
+      type: 'CLEAR_HIGH_SCORES',
+      roomId: this.roomId
+    });
+  }
+
+  public requestHighScores(): void {
+    this.send({
+      type: 'REQUEST_HIGH_SCORES',
+      roomId: this.roomId
+    });
+  }
+
+  public startCountdown(countdownSec: number = 3): void {
+    this.send({
+      type: 'START_COUNTDOWN',
+      roomId: this.roomId,
+      countdownSec
+    });
+  }
+
+  public toggleBots(enabled?: boolean): void {
+    this.send({
+      type: 'TOGGLE_BOTS',
+      roomId: this.roomId,
+      ...(enabled !== undefined ? { enabled } : {})
+    });
   }
 
   public sendFrame(frame: TelemetryFramePayload): void {

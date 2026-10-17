@@ -10,10 +10,13 @@
 
 const http = require('http');
 const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
 
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3500;
 const MAX_SLOTS = 6;
 const DEFAULT_ROOM_ID = 'ARENA-1';
+const HIGH_SCORES_FILE = path.resolve(__dirname, '..', 'data', 'high_scores.json');
 
 // ==================== RFC 6455 PROTOCOL HELPERS ====================
 function encodeFrame(text) {
@@ -141,6 +144,7 @@ class ArenaRoom {
 
     this.botsEnabled = true;
     this.countdown = null; // { count, timerId }
+    this.snapshotTick = 0;
     this.initBots();
   }
 
@@ -173,20 +177,44 @@ class ArenaRoom {
         slot.alive = enabled;
       }
     }
-    this.broadcastToSpectators({
+    this.broadcastAll({
       type: 'ROOM_STATUS',
       roomId: this.roomId,
       botsEnabled: this.botsEnabled,
       slots: this.slots
     });
+    this.broadcastArenaSnapshot(true);
+  }
+
+  freeSlotHelper(oldSlotId) {
+    const oldSlot = this.slots[oldSlotId - 1];
+    if (!oldSlot) return;
+    oldSlot.connected = false;
+    oldSlot.token = null;
+    if (this.botsEnabled && oldSlotId > 1) {
+      oldSlot.isBot = true;
+      oldSlot.name = BOT_NAMES[oldSlotId - 2] || `Bot ${oldSlotId}`;
+      oldSlot.status = 'ready';
+      oldSlot.alive = true;
+      oldSlot.score = 0;
+      oldSlot.apples = 0;
+    } else {
+      oldSlot.isBot = false;
+      oldSlot.name = `Slot ${oldSlotId}`;
+      oldSlot.status = 'empty';
+      oldSlot.alive = false;
+      oldSlot.score = 0;
+      oldSlot.apples = 0;
+    }
   }
 
   registerPlayer(socket, requestedSlot, name, providedToken) {
     this.lastActivity = Date.now();
-    let slotId = requestedSlot ? parseInt(requestedSlot, 10) : 1;
-    if (isNaN(slotId) || slotId < 1 || slotId > MAX_SLOTS) {
-      slotId = 1;
+    let parsedSlot = requestedSlot ? parseInt(requestedSlot, 10) : 1;
+    if (isNaN(parsedSlot) || parsedSlot < 1 || parsedSlot > MAX_SLOTS) {
+      parsedSlot = 1;
     }
+    let slotId = parsedSlot;
 
     let token = providedToken;
     let isReconnect = false;
@@ -194,9 +222,17 @@ class ArenaRoom {
     // 1. RECONEXIÓN CON TOKEN EXISTENTE
     if (token && this.tokens.has(token)) {
       const tokenData = this.tokens.get(token);
-      slotId = tokenData.slotId;
       isReconnect = true;
-      console.log(`[${this.roomId}] Jugador reconectado con token válido en Slot ${slotId}: ${tokenData.name}`);
+
+      // Si el jugador eligió explícitamente cambiarse a otro slot libre, permitir el cambio
+      if (parsedSlot !== tokenData.slotId && !this.slots[parsedSlot - 1].connected) {
+        this.freeSlotHelper(tokenData.slotId);
+        slotId = parsedSlot;
+        console.log(`[${this.roomId}] Jugador cambió de Slot ${tokenData.slotId} a Slot ${slotId}`);
+      } else {
+        slotId = tokenData.slotId;
+        console.log(`[${this.roomId}] Jugador reconectado con token válido en Slot ${slotId}: ${tokenData.name}`);
+      }
 
       // Desconectar socket anterior si existía
       for (const [existingSocket, pInfo] of this.players.entries()) {
@@ -209,6 +245,14 @@ class ArenaRoom {
       }
     } else {
       // 2. NUEVO INGRESO
+      // Si el mismo socket ya ocupaba otro slot, liberarlo primero
+      if (this.players.has(socket)) {
+        const prev = this.players.get(socket);
+        if (prev.slotId !== slotId) {
+          this.freeSlotHelper(prev.slotId);
+        }
+      }
+
       const targetSlot = this.slots[slotId - 1];
       // Si el slot solicitado ya está ocupado por otro jugador humano activo
       if (targetSlot.connected) {
@@ -238,7 +282,7 @@ class ArenaRoom {
     const slot = this.slots[slotId - 1];
     slot.connected = true;
     slot.isBot = false;
-    slot.name = name || slot.name || `Piloto #${slotId}`;
+    slot.name = (name && name.trim()) ? name.trim().slice(0, 16) : (slot.name && !slot.name.startsWith('Bot ') && !slot.name.startsWith('Slot ') ? slot.name : `Piloto #${slotId}`);
     slot.status = 'ready';
     slot.alive = true;
     slot.score = slot.score || 0;
@@ -269,7 +313,7 @@ class ArenaRoom {
       botsEnabled: this.botsEnabled
     });
 
-    this.broadcastArenaSnapshot();
+    this.broadcastArenaSnapshot(true);
     console.log(`[${this.roomId}] Jugador ${slot.name} asignado al Slot ${slotId} (Token: ${token.substring(0, 10)}...)`);
   }
 
@@ -292,7 +336,7 @@ class ArenaRoom {
 
       this.players.delete(socket);
       console.log(`[${this.roomId}] Jugador desconectado de Slot ${player.slotId} (Token conservado para reconexión)`);
-      this.broadcastArenaSnapshot();
+      this.broadcastArenaSnapshot(true);
     }
     this.spectators.delete(socket);
   }
@@ -304,6 +348,10 @@ class ArenaRoom {
 
     const slot = this.slots[player.slotId - 1];
     slot.lastSeen = Date.now();
+    if (frame.name && typeof frame.name === 'string' && frame.name.trim()) {
+      slot.name = frame.name.trim().slice(0, 16);
+      player.name = slot.name;
+    }
     slot.status = frame.alive ? 'playing' : 'eliminated';
     slot.alive = !!frame.alive;
     slot.score = frame.score !== undefined ? frame.score : slot.score;
@@ -473,8 +521,9 @@ class ArenaRoom {
     }
   }
 
-  broadcastArenaSnapshot() {
+  broadcastArenaSnapshot(forcePlayers = false) {
     if (this.spectators.size === 0 && this.players.size === 0) return;
+    this.snapshotTick = (this.snapshotTick + 1) % 3;
 
     const payload = {
       type: 'ARENA_SNAPSHOT',
@@ -507,6 +556,15 @@ class ArenaRoom {
         socket.write(encoded);
       } catch {}
     }
+
+    // Enviar también a los jugadores conectados (~10 FPS o inmediato en eventos de sala)
+    if (forcePlayers || this.snapshotTick === 0) {
+      for (const [socket] of this.players) {
+        try {
+          socket.write(encoded);
+        } catch {}
+      }
+    }
   }
 
   broadcastAll(payload) {
@@ -533,14 +591,100 @@ class ArenaRoom {
   }
 }
 
-// ==================== MULTI-ROOM MANAGER ====================
+// ==================== MULTI-ROOM & SHARED LEADERBOARD MANAGER ====================
 class RoomManager {
   constructor() {
     this.rooms = new Map();
     // Socket -> { roomId, isSpectator, isPlayer }
     this.socketMap = new Map();
+    this.highScores = this.loadHighScores();
     // Crear sala por defecto
     this.getOrCreateRoom(DEFAULT_ROOM_ID);
+  }
+
+  loadHighScores() {
+    try {
+      if (fs.existsSync(HIGH_SCORES_FILE)) {
+        const raw = fs.readFileSync(HIGH_SCORES_FILE, 'utf8');
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          return parsed.sort((a, b) => (b.score || 0) - (a.score || 0)).slice(0, 50);
+        }
+      }
+    } catch (err) {
+      console.error('[RoomManager] Error leyendo high_scores.json:', err.message);
+    }
+    return [
+      { id: 'seed-1', name: 'Master Cobra', score: 240, difficulty: 'normal', gameMode: 'classic', apples: 22, date: 'Reciente' },
+      { id: 'seed-2', name: 'Ghost Viper', score: 210, difficulty: 'normal', gameMode: 'portal', apples: 19, date: 'Reciente' },
+      { id: 'seed-3', name: 'RetroGamer', score: 180, difficulty: 'normal', gameMode: 'classic', apples: 16, date: 'Reciente' }
+    ];
+  }
+
+  saveHighScoresToDisk() {
+    try {
+      const dir = path.dirname(HIGH_SCORES_FILE);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+      fs.writeFileSync(HIGH_SCORES_FILE, JSON.stringify(this.highScores, null, 2), 'utf8');
+    } catch (err) {
+      console.error('[RoomManager] Error guardando high_scores.json:', err.message);
+    }
+  }
+
+  getHighScores() {
+    return this.highScores;
+  }
+
+  addHighScore(entry) {
+    if (!entry || typeof entry.score !== 'number') return this.highScores;
+    const cleanEntry = {
+      id: entry.id || ('sc_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6)),
+      name: (entry.name && String(entry.name).trim()) ? String(entry.name).trim().slice(0, 16) : 'PilotoSnake',
+      score: Math.max(0, Math.floor(entry.score)),
+      difficulty: entry.difficulty || 'normal',
+      gameMode: entry.gameMode === 'portal' ? 'portal' : 'classic',
+      apples: Math.max(0, Math.floor(entry.apples || 0)),
+      goldenApples: Math.max(0, Math.floor(entry.goldenApples || 0)),
+      date: entry.date || new Date().toLocaleString('es-AR', { hour12: false })
+    };
+
+    // Evitar duplicados por id
+    const filtered = this.highScores.filter(item => item.id !== cleanEntry.id);
+    filtered.push(cleanEntry);
+    filtered.sort((a, b) => b.score - a.score);
+    this.highScores = filtered.slice(0, 50);
+    this.saveHighScoresToDisk();
+
+    this.broadcastGlobal({
+      type: 'HIGH_SCORES_SYNC',
+      scores: this.highScores
+    });
+
+    return this.highScores;
+  }
+
+  clearHighScores() {
+    this.highScores = [];
+    this.saveHighScoresToDisk();
+    this.broadcastGlobal({
+      type: 'HIGH_SCORES_SYNC',
+      scores: this.highScores
+    });
+    return this.highScores;
+  }
+
+  broadcastGlobal(payload) {
+    const encoded = encodeFrame(JSON.stringify(payload));
+    for (const room of this.rooms.values()) {
+      for (const socket of room.spectators) {
+        try { socket.write(encoded); } catch {}
+      }
+      for (const [socket] of room.players) {
+        try { socket.write(encoded); } catch {}
+      }
+    }
   }
 
   sanitizeRoomId(rawId) {
@@ -585,7 +729,7 @@ class RoomManager {
   updateAll() {
     for (const room of this.rooms.values()) {
       room.updateBots();
-      room.broadcastArenaSnapshot();
+      room.broadcastArenaSnapshot(false);
     }
   }
 
@@ -612,7 +756,8 @@ class RoomManager {
       service: 'Snake Arena Multi-Room WebSocket Relay',
       port: PORT,
       totalRooms: this.rooms.size,
-      rooms: roomsData
+      rooms: roomsData,
+      highScoresCount: this.highScores.length
     };
   }
 }
@@ -622,7 +767,7 @@ const roomManager = new RoomManager();
 // ==================== HTTP & WEBSOCKET SERVER ====================
 const server = http.createServer((req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
   if (req.method === 'OPTIONS') {
@@ -635,6 +780,36 @@ const server = http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(roomManager.getStatus()));
     return;
+  }
+
+  if (req.url === '/scores' || req.url === '/relay/scores') {
+    if (req.method === 'GET') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ scores: roomManager.getHighScores() }));
+      return;
+    }
+    if (req.method === 'DELETE') {
+      const updated = roomManager.clearHighScores();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ scores: updated }));
+      return;
+    }
+    if (req.method === 'POST') {
+      let body = '';
+      req.on('data', chunk => { body += chunk; });
+      req.on('end', () => {
+        try {
+          const parsed = JSON.parse(body || '{}');
+          const updated = roomManager.addHighScore(parsed);
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ scores: updated }));
+        } catch {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Invalid JSON' }));
+        }
+      });
+      return;
+    }
   }
 
   res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
@@ -701,6 +876,10 @@ function handleClientMessage(socket, data) {
     case 'REGISTER_PLAYER':
       roomManager.bindSocket(socket, room.roomId, false);
       room.registerPlayer(socket, data.slotId, data.name, data.token);
+      room.send(socket, {
+        type: 'HIGH_SCORES_SYNC',
+        scores: roomManager.getHighScores()
+      });
       break;
 
     case 'TELEMETRY_FRAME':
@@ -715,6 +894,27 @@ function handleClientMessage(socket, data) {
         roomId: room.roomId,
         slots: room.slots,
         botsEnabled: room.botsEnabled
+      });
+      room.send(socket, {
+        type: 'HIGH_SCORES_SYNC',
+        scores: roomManager.getHighScores()
+      });
+      break;
+
+    case 'SUBMIT_HIGH_SCORE':
+      if (data.entry) {
+        roomManager.addHighScore(data.entry);
+      }
+      break;
+
+    case 'CLEAR_HIGH_SCORES':
+      roomManager.clearHighScores();
+      break;
+
+    case 'REQUEST_HIGH_SCORES':
+      room.send(socket, {
+        type: 'HIGH_SCORES_SYNC',
+        scores: roomManager.getHighScores()
       });
       break;
 
@@ -751,5 +951,5 @@ if (require.main === module) {
   });
 }
 
-module.exports = { ArenaRoom, RoomManager, roomManager, decodeFrames, encodeFrame, server };
+module.exports = { ArenaRoom, RoomManager, roomManager, decodeFrames, encodeFrame, handleClientMessage, server };
 

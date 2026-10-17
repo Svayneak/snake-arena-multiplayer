@@ -122,6 +122,29 @@ export class ScoreManager {
     }
   }
 
+  private listeners: Set<() => void> = new Set();
+
+  public onChange(cb: () => void): void {
+    this.listeners.add(cb);
+  }
+
+  public offChange(cb: () => void): void {
+    this.listeners.delete(cb);
+  }
+
+  private notifyListeners(): void {
+    this.listeners.forEach(cb => {
+      try { cb(); } catch {}
+    });
+  }
+
+  public syncRemoteScores(remoteScores: HighScoreEntry[]): void {
+    if (!Array.isArray(remoteScores)) return;
+    const sorted = [...remoteScores].sort((a, b) => (b.score || 0) - (a.score || 0)).slice(0, 50);
+    this.safeSet(this.SCORES_KEY, JSON.stringify(sorted));
+    this.notifyListeners();
+  }
+
   public saveScore(entry: Omit<HighScoreEntry, 'id' | 'date'>): HighScoreEntry {
     const list = this.getScores('all');
     const newEntry: HighScoreEntry = {
@@ -136,6 +159,7 @@ export class ScoreManager {
 
     this.safeSet(this.SCORES_KEY, JSON.stringify(topScores));
     this.setLastName(entry.name);
+    this.notifyListeners();
     return newEntry;
   }
 
@@ -208,6 +232,7 @@ export class ScoreManager {
 
   public clearScores(): void {
     this.safeSet(this.SCORES_KEY, JSON.stringify([]));
+    this.notifyListeners();
   }
 
   public exportScoresJSON(): string {

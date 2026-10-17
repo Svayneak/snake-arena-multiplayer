@@ -8,11 +8,11 @@ import {
 } from 'lucide-react';
 import { SnakeGame, GameOverData } from '@/lib/engine';
 import { soundManager } from '@/lib/audio';
-import { scoreManager } from '@/lib/storage';
+import { scoreManager, HighScoreEntry } from '@/lib/storage';
 import { cursorTracker } from '@/lib/tracker';
 import { QuickPauseMenu } from './QuickPauseMenu';
 import { Leaderboard } from './Leaderboard';
-import { arenaNet } from '@/lib/network';
+import { arenaNet, ArenaSlotSummary, ArenaSnapshotEvent } from '@/lib/network';
 import { detectDevice, DeviceInfo } from '@/lib/device';
 import { touchTracker } from '@/lib/touchTracker';
 import { TouchControls } from './TouchControls';
@@ -58,6 +58,8 @@ export const SnakeGameComponent: React.FC = () => {
   const [isGameOverModalOpen, setIsGameOverModalOpen] = useState<boolean>(false);
   const [gameOverInfo, setGameOverInfo] = useState<GameOverData | null>(null);
   const [playerName, setPlayerName] = useState<string>('');
+  const playerNameRef = useRef<string>('PilotoSnake');
+  const lastSavedEntryIdRef = useRef<string | null>(null);
   const [isHighScore, setIsHighScore] = useState<boolean>(false);
   const [scoreSaved, setScoreSaved] = useState<boolean>(false);
 
@@ -70,6 +72,8 @@ export const SnakeGameComponent: React.FC = () => {
   const [countdownOverlay, setCountdownOverlay] = useState<number | null>(null);
   const [isRoomSwitcherOpen, setIsRoomSwitcherOpen] = useState<boolean>(false);
   const [roomInput, setRoomInput] = useState<string>('ARENA-1');
+  const [roomSlots, setRoomSlots] = useState<ArenaSlotSummary[]>([]);
+  const [showBotsInBar, setShowBotsInBar] = useState<boolean>(false);
 
   // Device & Touchscreen Detection
   const [device, setDevice] = useState<DeviceInfo>(() => detectDevice());
@@ -97,15 +101,27 @@ export const SnakeGameComponent: React.FC = () => {
     setControlType(saved.controlType);
     setSoundEnabled(saved.soundEnabled);
     setBestScore(scoreManager.getTopScore(saved.difficulty));
-    setPlayerName(scoreManager.getLastName());
+    const last = scoreManager.getLastName();
+    setPlayerName(last);
+    playerNameRef.current = last;
   }, []);
 
-  // Update best score when difficulty changes
   useEffect(() => {
-    setBestScore(scoreManager.getTopScore(difficulty));
+    if (playerName && playerName.trim()) {
+      playerNameRef.current = playerName.trim();
+      arenaNet.setPlayerName(playerName.trim());
+    }
+  }, [playerName]);
+
+  // Update best score when difficulty or shared scores change
+  useEffect(() => {
+    const updateBest = () => setBestScore(scoreManager.getTopScore(difficulty));
+    updateBest();
+    scoreManager.onChange(updateBest);
+    return () => scoreManager.offChange(updateBest);
   }, [difficulty]);
 
-  // Connect to Multiplayer Spectator Relay (Port 3500) with Room & Token
+  // Connect to Multiplayer Spectator Relay with Room & Token
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const searchParams = new URLSearchParams(window.location.search);
@@ -118,14 +134,26 @@ export const SnakeGameComponent: React.FC = () => {
     const finalSlot = isNaN(requestedSlot) || requestedSlot < 1 || requestedSlot > 6 ? 1 : requestedSlot;
     setSlotId(finalSlot);
 
-    arenaNet.connect(finalSlot, playerName || `Piloto #${finalSlot}`, finalRoom);
+    const initialName = scoreManager.getLastName() || `Piloto #${finalSlot}`;
+    arenaNet.connect(finalSlot, initialName === 'SnakePilot' ? `Piloto #${finalSlot}` : initialName, finalRoom);
 
     const handleConn = (conn: unknown) => setIsNetConnected(!!conn);
     const handlePlayerRegistered = (reg: unknown) => {
-      const p = reg as { slotId: number; token: string; isReconnect: boolean; roomId: string };
+      const p = reg as { slotId: number; token: string; isReconnect: boolean; roomId: string; name?: string };
       setSlotId(p.slotId);
       setPlayerToken(p.token);
       setIsReconnected(p.isReconnect);
+    };
+    const handleArenaSnapshot = (snap: unknown) => {
+      const s = snap as ArenaSnapshotEvent;
+      if (s && Array.isArray(s.slots)) {
+        setRoomSlots(s.slots);
+      }
+    };
+    const handleHighScoresSync = (remoteScores: unknown) => {
+      if (Array.isArray(remoteScores)) {
+        scoreManager.syncRemoteScores(remoteScores as HighScoreEntry[]);
+      }
     };
     const handleCountTick = (cnt: unknown) => setCountdownOverlay(cnt as number);
     const handleCountStart = () => {
@@ -148,6 +176,8 @@ export const SnakeGameComponent: React.FC = () => {
 
     arenaNet.on('connection_change', handleConn);
     arenaNet.on('player_registered', handlePlayerRegistered);
+    arenaNet.on('arena_snapshot', handleArenaSnapshot);
+    arenaNet.on('high_scores_sync', handleHighScoresSync);
     arenaNet.on('countdown_tick', handleCountTick);
     arenaNet.on('countdown_start', handleCountStart);
     arenaNet.on('round_reset', handleRoundReset);
@@ -163,11 +193,13 @@ export const SnakeGameComponent: React.FC = () => {
       clearInterval(streamTimer);
       arenaNet.off('connection_change', handleConn);
       arenaNet.off('player_registered', handlePlayerRegistered);
+      arenaNet.off('arena_snapshot', handleArenaSnapshot);
+      arenaNet.off('high_scores_sync', handleHighScoresSync);
       arenaNet.off('countdown_tick', handleCountTick);
       arenaNet.off('countdown_start', handleCountStart);
       arenaNet.off('round_reset', handleRoundReset);
     };
-  }, [playerName]);
+  }, []);
 
   // Instantiate Game Engine
   useEffect(() => {
@@ -200,6 +232,25 @@ export const SnakeGameComponent: React.FC = () => {
         scoreManager.recordMatchStats(data.score, data.apples, data.goldenApples);
         const high = scoreManager.isHighScore(data.score, data.difficulty);
         setIsHighScore(high);
+
+        // Sincronizar automáticamente el puntaje con el servidor si hizo puntos (> 0)
+        if (data.score > 0) {
+          const autoName = playerNameRef.current && playerNameRef.current !== 'SnakePilot'
+            ? playerNameRef.current
+            : `Piloto #${arenaNet.getSlotId()}`;
+          const savedEntry = scoreManager.saveScore({
+            name: autoName,
+            score: data.score,
+            difficulty: data.difficulty,
+            gameMode: data.gameMode,
+            apples: data.apples,
+            goldenApples: data.goldenApples
+          });
+          lastSavedEntryIdRef.current = savedEntry.id;
+          arenaNet.submitHighScore(savedEntry as unknown as Record<string, unknown>);
+        } else {
+          lastSavedEntryIdRef.current = null;
+        }
 
         if (high) {
           soundManager.playHighScore();
@@ -449,8 +500,9 @@ export const SnakeGameComponent: React.FC = () => {
   // Save Score from Game Over
   const handleSaveScore = () => {
     if (!gameOverInfo || scoreSaved) return;
-    const finalName = playerName.trim() || 'PilotoSnake';
-    scoreManager.saveScore({
+    const finalName = playerName.trim() || `Piloto #${slotId}`;
+    scoreManager.setLastName(finalName);
+    const savedEntry = scoreManager.saveScore({
       name: finalName,
       score: gameOverInfo.score,
       difficulty: gameOverInfo.difficulty,
@@ -458,9 +510,16 @@ export const SnakeGameComponent: React.FC = () => {
       apples: gameOverInfo.apples,
       goldenApples: gameOverInfo.goldenApples
     });
+    const entryToSend = {
+      ...savedEntry,
+      ...(lastSavedEntryIdRef.current ? { id: lastSavedEntryIdRef.current } : {})
+    };
+    arenaNet.submitHighScore(entryToSend as unknown as Record<string, unknown>);
     setScoreSaved(true);
     setBestScore(scoreManager.getTopScore(difficulty));
   };
+
+  const visibleRoomSlots = roomSlots.filter(s => s.connected || s.slotId === slotId || (showBotsInBar && s.isBot));
 
   return (
     <div ref={containerRef} className="flex flex-col items-center w-full max-w-5xl mx-auto px-4 py-2 select-none">
@@ -601,6 +660,90 @@ export const SnakeGameComponent: React.FC = () => {
         <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-2.5 shadow-sm">
           <div className="text-[11px] text-slate-400 uppercase tracking-wider font-semibold">Récord</div>
           <div className="text-2xl font-black text-amber-400">{bestScore}</div>
+        </div>
+      </div>
+
+      {/* Live Multiplayer Room Scoreboard */}
+      <div className="w-full rounded-xl bg-slate-900/75 border border-slate-800/90 px-3 py-2 mb-2">
+        <div className="flex flex-wrap items-center justify-between gap-2 mb-1.5">
+          <div className="flex items-center gap-2 text-xs">
+            <Users className="h-3.5 w-3.5 text-emerald-400" />
+            <span className="font-bold text-slate-200">
+              Marcador en Vivo — Sala <span className="font-mono text-emerald-400">{roomId}</span>
+            </span>
+            <span className="text-[11px] text-slate-400">
+              ({roomSlots.filter(s => s.connected).length} jugador{roomSlots.filter(s => s.connected).length === 1 ? '' : 'es'} conectado{roomSlots.filter(s => s.connected).length === 1 ? '' : 's'})
+            </span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => setShowBotsInBar(!showBotsInBar)}
+              className={`px-2 py-0.5 rounded text-[11px] font-semibold border transition ${
+                showBotsInBar
+                  ? 'bg-sky-500/20 text-sky-300 border-sky-500/40'
+                  : 'bg-slate-800 text-slate-400 border-slate-700 hover:text-slate-200'
+              }`}
+            >
+              {showBotsInBar ? '🤖 Ocultar Bots' : '🤖 Ver Bots'}
+            </button>
+            <button
+              type="button"
+              onClick={() => arenaNet.startCountdown(3)}
+              className="px-2.5 py-0.5 rounded bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 text-[11px] font-bold transition"
+              title="Iniciar cuenta regresiva 3..2..1 en todos los dispositivos de la sala"
+            >
+              ⏱️ Ronda 3..2..1
+            </button>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2">
+          {visibleRoomSlots.map((s) => {
+            const isMe = s.slotId === slotId;
+            const displayScore = isMe ? score : s.score;
+            const displayApples = isMe ? apples : s.apples;
+            return (
+              <div
+                key={s.slotId}
+                onClick={() => {
+                  if (!isMe && !s.connected) {
+                    setSlotId(s.slotId);
+                    arenaNet.connect(s.slotId, playerName || `Piloto #${s.slotId}`, roomId);
+                  }
+                }}
+                className={`rounded-lg px-2.5 py-1.5 border text-xs flex flex-col justify-between transition ${
+                  isMe
+                    ? 'bg-emerald-500/15 border-emerald-500/50 text-emerald-200 shadow-sm'
+                    : s.connected
+                    ? 'bg-sky-500/10 border-sky-500/40 text-sky-100'
+                    : 'bg-slate-950/60 border-slate-800 text-slate-400'
+                }`}
+              >
+                <div className="flex items-center justify-between gap-1">
+                  <span className="font-mono font-bold text-[11px] text-amber-300">
+                    #{s.slotId}
+                  </span>
+                  <span className="truncate font-semibold text-[11px] flex-1">
+                    {isMe ? (playerName && playerName !== 'SnakePilot' ? playerName : s.name) : s.name}
+                  </span>
+                  {isMe && (
+                    <span className="px-1 rounded bg-emerald-500/30 text-emerald-300 text-[9px] font-bold">
+                      TÚ
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-baseline justify-between mt-1">
+                  <span className="text-sm font-black text-white">
+                    {displayScore} <span className="text-[10px] font-normal text-slate-400">pts</span>
+                  </span>
+                  <span className="text-[10px] text-rose-300 font-semibold">
+                    🍎 {displayApples}
+                  </span>
+                </div>
+              </div>
+            );
+          })}
         </div>
       </div>
 
@@ -860,6 +1003,21 @@ export const SnakeGameComponent: React.FC = () => {
               </button>
             </div>
 
+            {/* Player Name Input */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-slate-300">
+                Tu Nombre / Apodo en la Sala:
+              </label>
+              <input
+                type="text"
+                maxLength={16}
+                value={playerName}
+                onChange={(e) => setPlayerName(e.target.value)}
+                placeholder={`Piloto #${slotId}`}
+                className="w-full rounded-xl bg-slate-800 border border-slate-700 px-3 py-2 text-sm text-white focus:outline-none focus:border-emerald-500"
+              />
+            </div>
+
             {/* Room Code */}
             <div className="space-y-2">
               <label className="text-xs font-semibold text-slate-300">
@@ -894,20 +1052,29 @@ export const SnakeGameComponent: React.FC = () => {
                 Selecciona tu Slot (1 al 6):
               </label>
               <div className="grid grid-cols-6 gap-1.5">
-                {[1, 2, 3, 4, 5, 6].map((s) => (
-                  <button
-                    key={s}
-                    type="button"
-                    onClick={() => setSlotId(s)}
-                    className={`py-2 rounded-xl text-xs font-bold font-mono transition border ${
-                      slotId === s
-                        ? 'bg-emerald-500 text-slate-950 border-emerald-400 shadow-md shadow-emerald-500/20'
-                        : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700'
-                    }`}
-                  >
-                    #{s}
-                  </button>
-                ))}
+                {[1, 2, 3, 4, 5, 6].map((s) => {
+                  const slotInfo = roomSlots.find(r => r.slotId === s);
+                  const isOccupiedByOther = slotInfo?.connected && s !== slotId;
+                  return (
+                    <button
+                      key={s}
+                      type="button"
+                      onClick={() => setSlotId(s)}
+                      className={`py-2 rounded-xl text-xs font-bold font-mono transition border flex flex-col items-center ${
+                        slotId === s
+                          ? 'bg-emerald-500 text-slate-950 border-emerald-400 shadow-md shadow-emerald-500/20'
+                          : isOccupiedByOther
+                          ? 'bg-sky-500/15 text-sky-300 border-sky-500/40'
+                          : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700'
+                      }`}
+                    >
+                      <span>#{s}</span>
+                      <span className="text-[9px] font-normal opacity-80">
+                        {slotInfo?.connected ? 'Ocupado' : 'Libre'}
+                      </span>
+                    </button>
+                  );
+                })}
               </div>
             </div>
 
@@ -933,6 +1100,11 @@ export const SnakeGameComponent: React.FC = () => {
                 type="button"
                 onClick={() => {
                   const clean = roomInput.trim().toUpperCase().replace(/[^A-Z0-9_-]/g, '').slice(0, 16) || 'ARENA-1';
+                  const finalPlayerName = (playerName && playerName.trim() && playerName.trim() !== 'SnakePilot')
+                    ? playerName.trim()
+                    : `Piloto #${slotId}`;
+                  setPlayerName(finalPlayerName);
+                  scoreManager.setLastName(finalPlayerName);
                   setRoomId(clean);
                   if (typeof window !== 'undefined') {
                     const url = new URL(window.location.href);
@@ -940,7 +1112,7 @@ export const SnakeGameComponent: React.FC = () => {
                     url.searchParams.set('slot', slotId.toString());
                     window.history.pushState({}, '', url.toString());
                   }
-                  arenaNet.connect(slotId, playerName || `Piloto #${slotId}`, clean);
+                  arenaNet.connect(slotId, finalPlayerName, clean);
                   setIsRoomSwitcherOpen(false);
                 }}
                 className="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 font-bold text-xs text-slate-950 hover:brightness-110 shadow-lg shadow-emerald-500/20 transition"

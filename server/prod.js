@@ -12,7 +12,8 @@ const {
   RoomManager, 
   roomManager, 
   decodeFrames, 
-  encodeFrame 
+  encodeFrame,
+  handleClientMessage
 } = require('./relay.js');
 
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
@@ -31,6 +32,45 @@ app.prepare().then(() => {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(roomManager.getStatus()));
       return;
+    }
+
+    // Shared High Scores Endpoint
+    if (req.url === '/scores' || req.url === '/relay/scores') {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+      if (req.method === 'OPTIONS') {
+        res.writeHead(200);
+        res.end();
+        return;
+      }
+      if (req.method === 'GET') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ scores: roomManager.getHighScores() }));
+        return;
+      }
+      if (req.method === 'DELETE') {
+        const updated = roomManager.clearHighScores();
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ scores: updated }));
+        return;
+      }
+      if (req.method === 'POST') {
+        let body = '';
+        req.on('data', chunk => { body += chunk; });
+        req.on('end', () => {
+          try {
+            const parsed = JSON.parse(body || '{}');
+            const updated = roomManager.addHighScore(parsed);
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ scores: updated }));
+          } catch {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Invalid JSON' }));
+          }
+        });
+        return;
+      }
     }
 
     // Next.js handles all static assets, pages and API routes
@@ -89,48 +129,6 @@ app.prepare().then(() => {
       roomManager.handleDisconnect(socket);
     });
   });
-
-  function handleClientMessage(socket, data) {
-    const targetRoomId = roomManager.sanitizeRoomId(data.roomId);
-    const room = roomManager.getOrCreateRoom(targetRoomId);
-
-    switch (data.type) {
-      case 'REGISTER_PLAYER':
-        roomManager.bindSocket(socket, room.roomId, false);
-        room.registerPlayer(socket, data.slotId, data.name, data.token);
-        break;
-
-      case 'TELEMETRY_FRAME':
-        room.updatePlayerFrame(socket, data);
-        break;
-
-      case 'REGISTER_SPECTATOR':
-        roomManager.bindSocket(socket, room.roomId, true);
-        room.spectators.add(socket);
-        room.send(socket, {
-          type: 'SPECTATOR_JOINED',
-          roomId: room.roomId,
-          slots: room.slots,
-          botsEnabled: room.botsEnabled
-        });
-        break;
-
-      case 'TOGGLE_BOTS':
-        room.toggleBots(data.enabled !== undefined ? !!data.enabled : !room.botsEnabled);
-        break;
-
-      case 'START_COUNTDOWN':
-        room.startCountdown(data.countdownSec || 3);
-        break;
-
-      case 'RESET_ROUND':
-        room.resetRound();
-        break;
-
-      default:
-        break;
-    }
-  }
 
   // 30 FPS Multi-Room Telemetry & AI Bot Loop
   setInterval(() => {

@@ -1,8 +1,9 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
-import { Trophy, Download, Trash2, X, Award, Flame, Apple } from 'lucide-react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { Trophy, Download, Trash2, X, Flame, Apple } from 'lucide-react';
 import { scoreManager, HighScoreEntry, PlayerStats } from '@/lib/storage';
+import { arenaNet } from '@/lib/network';
 
 interface LeaderboardProps {
   isOpen: boolean;
@@ -20,16 +21,21 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({ isOpen, onClose }) => 
   });
   const [confirmClearOpen, setConfirmClearOpen] = useState<boolean>(false);
 
-  const loadData = () => {
+  const loadData = useCallback(() => {
     setScores(scoreManager.getScores(filter));
     setStats(scoreManager.getStats());
-  };
+  }, [filter]);
 
   useEffect(() => {
     if (isOpen) {
       loadData();
+      arenaNet.requestHighScores();
     }
-  }, [isOpen, filter]);
+    scoreManager.onChange(loadData);
+    return () => {
+      scoreManager.offChange(loadData);
+    };
+  }, [isOpen, loadData]);
 
   if (!isOpen) return null;
 
@@ -55,6 +61,7 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({ isOpen, onClose }) => 
 
   const handleClear = () => {
     scoreManager.clearScores();
+    arenaNet.clearHighScores();
     setConfirmClearOpen(false);
     loadData();
   };
