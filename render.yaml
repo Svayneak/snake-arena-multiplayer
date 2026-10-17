@@ -1,0 +1,13 @@
+# Render.com Blueprint Specification
+# Docs: https://render.com/docs/blueprint-spec
+
+services:
+  - type: web
+    name: snake-arena-multiplayer
+    runtime: node
+    plan: free
+    buildCommand: npm install --include=dev && npm run build
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production

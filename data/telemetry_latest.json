@@ -1,0 +1,63 @@
+{
+  "lastUpdated": "2026-10-17T02:15:28.440Z",
+  "matchActive": false,
+  "matchStartTime": 2770240.6,
+  "stats": {
+    "totalSamples": 73,
+    "maxSpeedPxSec": 541,
+    "avgSpeedPxSec": 0,
+    "totalDistance": 463.3999999999997,
+    "anomaliesCount": 0,
+    "maxJumpPx": 0,
+    "matchMetadata": {
+      "gameMode": "classic",
+      "difficulty": "normal",
+      "controlType": "cursor",
+      "arenaWidth": 540,
+      "arenaHeight": 540
+    }
+  },
+  "latestSample": {
+    "id": 73,
+    "t": 11709,
+    "dt": 17,
+    "cx": 928,
+    "cy": 590,
+    "gx": 401.2,
+    "gy": 458.6,
+    "hx": 401.2,
+    "hy": 458.6,
+    "dx": -2.6,
+    "dy": -8.3,
+    "dist": 8.7,
+    "spd": 512,
+    "anom": 0
+  },
+  "samplesBatch": [],
+  "eventsBatch": [
+    {
+      "t": 11727,
+      "event": "GAME_OVER",
+      "data": {
+        "reason": "¡Tocaste tu propia cola!",
+        "stats": {
+          "totalSamples": 73,
+          "maxSpeedPxSec": 541,
+          "avgSpeedPxSec": 0,
+          "totalDistance": 463.3999999999997,
+          "anomaliesCount": 0,
+          "maxJumpPx": 0,
+          "matchMetadata": {
+            "gameMode": "classic",
+            "difficulty": "normal",
+            "controlType": "cursor",
+            "arenaWidth": 540,
+            "arenaHeight": 540
+          }
+        }
+      }
+    }
+  ],
+  "anomaliesBatch": [],
+  "timestamp": "2026-10-17T02:15:28.344Z"
+}
