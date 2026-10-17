@@ -1,87 +1,88 @@
 # 📜 REGISTRO DE CAMBIOS (CHANGELOG) - VÍBORA RETRO & SNAKE ARENA
 
-Documento oficial de control de versiones, evolución de arquitectura y estado del proyecto.
+Documento oficial de control de versiones, evolución de arquitectura, arnés de seguridad y despliegue en la nube.
 
 ---
 
 ## 📍 ESTADO ACTUAL DEL PROYECTO
-- **Versión**: `v1.3.0` (Multiplayer Arena & Spectator Room)
-- **Estado**: **PROBADO Y APROBADO** en entorno local y red móvil (Wi-Fi).
-- **Próximo Hito / Siguiente Etapa**: **SALA DE ESPERA MULTIJUGADOR (LOBBY / MATCHMAKING)**
-  - Asignación de salas/slots para hasta 6 jugadores humanos.
-  - Sistema de "Listo / Ready" por jugador.
-  - Sincronización de reglas (Dificultad, Modo Portal/Paredes, Velocidad).
-  - Cuenta regresiva automática cuando todos los jugadores marcan "Listo".
-  - Transición fluida desde el Lobby a la partida simultánea y transmisión a la Sala de Espectadores.
+- **Versión**: `v2.0.0` (Cloud Multiplayer, Live Room Scoreboard, Supabase Persistence & Linux Migration Pack)
+- **Estado**: **DESPLEGADO EN PRODUCCIÓN (LIVE)**
+  - **GitHub**: [https://github.com/Svayneak/snake-arena-multiplayer](https://github.com/Svayneak/snake-arena-multiplayer)
+  - **Render (Juego & WebSocket)**: [https://snake-arena-multiplayer.onrender.com](https://snake-arena-multiplayer.onrender.com)
+  - **Sala de Espectadores**: [https://snake-arena-multiplayer.onrender.com/spectator](https://snake-arena-multiplayer.onrender.com/spectator)
+  - **Base de Datos Cloud**: **Supabase PostgreSQL** (`naacgdwtglvcumaccime` → tabla `public.high_scores` con políticas RLS activas).
 
 ---
 
 ## 🗂️ HISTORIAL DE VERSIONES
 
+### [v2.0.0] - 2026-10-17 • Marcador Multijugador en Vivo, Persistencia en Supabase & Paquete de Migración a Linux
+#### 🚀 Nuevas Características
+- **Marcador Multijugador en Vivo en la Pantalla del Jugador (`components/SnakeGame.tsx` + `server/relay.js`)**:
+  - El servidor `server/relay.js` ahora retransmite instantáneas `ARENA_SNAPSHOT` (~10 FPS y en eventos de sala) a todos los jugadores conectados además de a los espectadores.
+  - Nueva barra **Marcador en Vivo — Sala** debajo del HUD principal que muestra en tiempo real los puntos, manzanas y estado de cada slot conectado (ej. `#1 PC` vs `#2 Celular`).
+  - Botón directo **`⏱️ Ronda 3..2..1`** en la vista del jugador para lanzar partidas sincronizadas entre todos los dispositivos sin necesidad de abrir `/spectator`.
+- **Cambio de Slot y Apodo en Vivo (`server/relay.js` + `components/SnakeGame.tsx`)**:
+  - Corrección en `registerPlayer` para liberar el slot anterior (`freeSlotHelper`) cuando un jugador con token activo selecciona explícitamente cambiarse a otro slot libre (1 al 6).
+  - Campo de **Nombre / Apodo** integrado directamente en el modal de configuración de Sala y Slot.
+- **Persistencia Permanente en la Nube con Supabase (`server/relay.js` + `render.yaml`)**:
+  - Provisionamiento automático de la tabla `public.high_scores` con Row Level Security (RLS) en Supabase (`https://naacgdwtglvcumaccime.supabase.co`).
+  - Sincronización híbrida de cero dependencias vía módulo nativo `https` de Node.js + respaldo local en `data/high_scores.json` + difusión en tiempo real por WebSocket (`HIGH_SCORES_SYNC`) y endpoint HTTP `/scores`.
+  - Auto-guardado automático al finalizar cada partida con puntaje `> 0` y actualización sin duplicados al personalizar el apodo.
+- **Documentación de Arnés, Modelos y Lanzador para Linux (`HARNESS_Y_MODELOS.md` & `run-linux.sh`)**:
+  - Inclusión del script `run-linux.sh` para iniciar el entorno de desarrollo o producción en Linux con un comando.
+  - Empaquetado portable y sanitizado del arnés `.agents/` (`hooks.json`, `mcp.example.json`, `rules/security.md`, `scripts/validate_command.js`, `scripts/session_resume.js`, `scripts/test_harness.js`) y registro completo de modelos utilizados (`HARNESS_Y_MODELOS.md`).
+
+---
+
+### [v1.5.0] - 2026-10-16 • Servidor Unificado de Producción (`server/prod.js`) & Blueprint de Render.com
+#### 🚀 Nuevas Características
+- **Servidor Unificado en Puerto Único (`server/prod.js`)**:
+  - Combina el servidor web de Next.js 14 y el servidor WebSocket RFC 6455 en el mismo servidor HTTP y puerto dinámico (`process.env.PORT`), requerido por contenedores cloud como Render.com.
+  - Respuesta automática a tramas WebSocket Ping (`0x09`) con Pong (`0x8A`) para mantener conexiones activas a través de balanceadores cloud.
+- **Blueprint de Despliegue (`render.yaml`)**:
+  - Configuración declarativa para despliegue automático en Render.com (`npm install --include=dev && npm run build` y `npm start`).
+  - Detección automática de protocolo seguro (`wss://`) en `lib/network.ts` cuando el cliente corre sobre HTTPS.
+
+---
+
+### [v1.4.0] - 2026-10-16 • Controles Táctiles Móviles, Aislamiento Multi-Sala y Tokens de Reconexión
+#### 🚀 Nuevas Características
+- **Soporte Táctil Completo para Celulares y Tablets (`lib/device.ts`, `lib/touchTracker.ts`, `components/TouchControls.tsx`)**:
+  - Detección dinámica de capacidades táctiles y orientación de pantalla.
+  - Seguimiento continuo del dedo sobre el canvas y soporte de gestos *swipe* + cruceta D-Pad interactiva.
+- **Arquitectura Multi-Sala (`RoomManager` en `server/relay.js`)**:
+  - Creación y aislamiento dinámico de múltiples salas (`ARENA-1`, códigos personalizados) con hasta 6 jugadores por sala.
+  - Generación de tokens criptográficos (`tok_...`) persistidos en `localStorage`/`sessionStorage` para reconexión transparente al mismo slot.
+  - Suite de pruebas unitarias de protocolo (`server/test_relay_rooms.js`).
+
+---
+
 ### [v1.3.0] - 2026-10-11 • Snake Arena Multijugador & Sala de Espectadores
 #### 🚀 Nuevas Características
 - **Servidor WebSocket Relay de Cero Dependencias (`server/relay.js`)**:
-  - Implementación nativa basada en RFC 6455 con los módulos de Node.js `http` y `crypto` en el puerto `3500`.
-  - Capacidad para 6 slots simultáneos con sincronización de estado global.
-  - Retransmisión de instantáneas de telemetría a 30 FPS (~33 ms).
-  - Simulación de Bots IA autónomos con navegación inteligente y evasión de bordes (`CyberViper`, `NeonCobra`, `GlitchPython`, `MatrixAdder`, `QuantumBoa`) para slots vacíos.
-  - Protocolo de eventos: `REGISTER_PLAYER`, `REGISTER_SPECTATOR`, `TELEMETRY_FRAME`, `START_COUNTDOWN`, `ROUND_RESET`, `TOGGLE_BOTS`.
+  - Implementación nativa basada en RFC 6455 con los módulos de Node.js `http` y `crypto`.
+  - Capacidad para 6 slots simultáneos con retransmisión a 30 FPS (~33 ms).
+  - Simulación de Bots IA autónomos (`CyberViper`, `NeonCobra`, `GlitchPython`, `MatrixAdder`, `QuantumBoa`).
 - **Sala de Espectadores en Vivo (`app/spectator/page.tsx`)**:
-  - Grilla interactiva de 6 mini-arenas en 2x3 con renderizadores canvas individuales en tiempo real (`components/SpectatorGrid.tsx`, `components/SpectatorMiniArena.tsx`).
-  - Paletas de color neón únicas por slot (Esmeralda, Cian, Púrpura, Ámbar, Rosa, Lima).
-  - Modo **Spotlight**: Posibilidad de fijar cualquier slot en vista principal ampliada con los demás en barra lateral.
-  - Panel de control con botones para Iniciar Ronda Sincronizada (3..2..1..¡YA!), Activar/Desactivar Bots y Reiniciar.
-  - Clasificación en vivo en tiempo real ordenada por puntuación.
-- **Cliente de Juego Conectado a la Red (`components/SnakeGame.tsx` & `lib/network.ts`)**:
-  - Conexión y reintento automático a `ws://<host>:3500`.
-  - Parámetro de slot vía URL (`?slot=1` a `6`).
-  - Insignia de estado `🟢 En Vivo (Slot #X)` con acceso directo a la sala de espectador.
-  - Overlay de cuenta regresiva sincronizada que bloquea y dispara el inicio de todos los jugadores al unísono.
-- **Soporte Móvil Multi-Dispositivo en LAN**:
-  - Next.js configurado con binding `0.0.0.0` para admitir conexiones desde celulares y tablets conectados a la misma red Wi-Fi (`http://192.168.100.97:3000/spectator`).
-  - Detección dinámica del host WebSocket (`window.location.hostname`).
-- **Lanzador Unificado de Un Clic (`run-arena.bat`)**:
-  - Cierra automáticamente sesiones previas en puertos 3000 y 3500.
-  - Levanta el relay en segundo plano, abre navegador en juego y espectador, e inicia Next.js.
-  - Informa en consola la IP local para conexión desde el celular.
+  - Grilla interactiva de 6 mini-arenas en 2x3 (`components/SpectatorGrid.tsx`, `components/SpectatorMiniArena.tsx`) con modo **Spotlight**.
 
 ---
 
 ### [v1.2.0] - 2026-10-11 • Estabilización del Motor, Cero Layout Shift & Telemetría Concurrente
 #### 🐛 Correcciones Críticas
-- **Throttling de la Manzana Dorada**:
-  - Se redujo la frecuencia de actualización del temporizador en React de 60 Hz a 1 Hz (`lastReportedBonusSec`), eliminando un 98.3% de re-renders innecesarios y garantizando 60 FPS estables en el juego.
-- **Eliminación Total de Layout Shift**:
-  - Fijación estricta de altura de 44px (`h-11`) en el contenedor exterior del banner de la manzana dorada, manteniéndolo estrictamente fuera del canvas. El canvas permanece 100% inmóvil.
-- **Blindaje de Modales con Estilos en Línea de Respaldo**:
-  - Se añadieron estilos rígidos en línea (`position: fixed`, `inset: 0`, `z-index: 9999`) a Game Over, Pausa Rápida y Leaderboard, garantizando centrado perfecto aún en demoras de carga de CSS.
-- **Cola Mutex en el Logger de Telemetría (`app/api/telemetry/route.ts`)**:
-  - Implementación de bloqueo secuencial para prevenir colisiones de escritura en Windows (`EBUSY` / `EPERM`) al persistir en `data/telemetry_latest.json` y `data/telemetry_flight_log.json`.
-- **Limpieza de Puertos y Traza en `run.bat`**:
-  - Cierre automático de procesos residuales en el puerto 3000 y borrado de bloqueos en `.next\trace`.
-- **Parche de Compatibilidad de TypeScript en Sandbox Windows**:
-  - Corrección en `has-necessary-dependencies.js` para capturar excepciones `realpath` y restricciones de exportación en `@types/react`.
+- **Throttling de la Manzana Dorada**: Reducción de actualizaciones de estado en React de 60 Hz a 1 Hz.
+- **Eliminación Total de Layout Shift**: Contenedor exterior fijo de 44px (`h-11`) para el banner dorado.
+- **Cola Mutex en el Logger de Telemetría (`app/api/telemetry/route.ts`)**.
 
 ---
 
 ### [v1.1.0] - 2026-10-10 • Port a Next.js 14 App Router & Telemetría en Servidor
 #### 🚀 Nuevas Características
-- Migración de la arquitectura a Next.js 14 (App Router) con TypeScript y Tailwind CSS.
-- Creación de la ruta de API `app/api/telemetry/route.ts` con almacenamiento local en disco.
-- Módulo `lib/tracker.ts` para muestreo de coordenadas de cursor, velocidad, aceleración y eventos de juego.
-- Modal de Pausa Rápida mediante click derecho con opciones completas de personalización.
-- Modo Widescreen Arena con redimensionamiento dinámico del canvas.
-- Leaderboard persistente con categorías de dificultad y exportación a JSON/CSV.
-- Sintetizador 8-Bit mediante Web Audio API pura (sin assets de audio externos).
+- Migración a Next.js 14 (App Router) con TypeScript, Tailwind CSS, sintetizador 8-bit (`lib/audio.ts`) y telemetría en disco.
 
 ---
 
 ### [v1.0.0] - 2026-10-09 • Creación del Motor de Cursor Continuo (Continuous Follower)
 #### 🚀 Características Fundamentales
-- Algoritmo de **Zero-Jump Armed Spawning**: nacimiento seguro bajo el cursor sin teletransportación.
-- **Tail Inception**: nacimiento de cola colapsada para evitar colisión de cuello al arrancar.
-- Escudo de inmunidad al renacer (1.5 segundos).
-- Guardia anti-teletransporte para movimientos superiores a 65px/fotograma.
-- Detección de auto-colisión filtrada a partir del segmento 8.
-- Modos de colisión: Pared Mortal Clásica vs. Portal Luminoso Continuo.
-- Soporte dual: Modo Cursor Continuo vs. Modo WASD Grilla Tradicional.
+- Algoritmo de **Zero-Jump Armed Spawning**, **Tail Inception**, escudo de nacimiento de 1.5s y guardia anti-teletransporte.

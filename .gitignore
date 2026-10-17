@@ -15,8 +15,11 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# Environment local overrides
+# Environment local overrides & MCP secrets
 .env*.local
+.agents/mcp.json
+.agents/index/*
+!.agents/index/.gitkeep
 
 # OS files
 .DS_Store

@@ -1,0 +1,29 @@
+{
+  "project-security-guard": {
+    "enabled": true,
+    "SessionStart": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node scripts/session_resume.js",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "run_command|view_file",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node scripts/validate_command.js",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

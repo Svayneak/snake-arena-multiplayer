@@ -1,0 +1,28 @@
+{
+  "mcpServers": {
+    "github": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-github"
+      ],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "REEMPLAZAR_CON_TU_GITHUB_PAT"
+      }
+    },
+    "supabase": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@supabase/mcp-server-supabase@latest",
+        "--project-ref=naacgdwtglvcumaccime"
+      ],
+      "env": {
+        "SUPABASE_ACCESS_TOKEN": "REEMPLAZAR_CON_TU_TOKEN_SBP",
+        "SUPABASE_PROJECT_REF": "naacgdwtglvcumaccime",
+        "SUPABASE_URL": "https://naacgdwtglvcumaccime.supabase.co",
+        "SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5hYWNnZHd0Z2x2Y3VtYWNjaW1lIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODc5Nzc2NDUsImV4cCI6MjEwMzU1MzY0NX0.QzVkPr7-aKYLTxVc6RzB_maVBykHBUvtvIIZm-522JE"
+      }
+    }
+  }
+}
