@@ -9,6 +9,7 @@
  */
 
 const http = require('http');
+const https = require('https');
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
@@ -17,6 +18,8 @@ const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3500;
 const MAX_SLOTS = 6;
 const DEFAULT_ROOM_ID = 'ARENA-1';
 const HIGH_SCORES_FILE = path.resolve(__dirname, '..', 'data', 'high_scores.json');
+const SUPABASE_URL = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://naacgdwtglvcumaccime.supabase.co';
+const SUPABASE_KEY = process.env.SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5hYWNnZHd0Z2x2Y3VtYWNjaW1lIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODc5Nzc2NDUsImV4cCI6MjEwMzU1MzY0NX0.QzVkPr7-aKYLTxVc6RzB_maVBykHBUvtvIIZm-522JE';
 
 // ==================== RFC 6455 PROTOCOL HELPERS ====================
 function encodeFrame(text) {
@@ -600,6 +603,74 @@ class RoomManager {
     this.highScores = this.loadHighScores();
     // Crear sala por defecto
     this.getOrCreateRoom(DEFAULT_ROOM_ID);
+    // Si hay llave de Supabase configurada, sincronizar con la nube al iniciar
+    if (SUPABASE_KEY) {
+      this.fetchHighScoresFromSupabase();
+    }
+  }
+
+  supabaseRequest(method, pathSuffix, body = null, extraHeaders = {}) {
+    return new Promise((resolve) => {
+      if (!SUPABASE_KEY || !SUPABASE_URL) return resolve(null);
+      try {
+        const parsedUrl = new URL(SUPABASE_URL);
+        const payload = body ? JSON.stringify(body) : null;
+        const req = https.request({
+          hostname: parsedUrl.hostname,
+          path: `/rest/v1/${pathSuffix}`,
+          method,
+          headers: {
+            'apikey': SUPABASE_KEY,
+            'Authorization': `Bearer ${SUPABASE_KEY}`,
+            'Content-Type': 'application/json',
+            ...extraHeaders,
+            ...(payload ? { 'Content-Length': Buffer.byteLength(payload) } : {})
+          }
+        }, (res) => {
+          let data = '';
+          res.on('data', chunk => { data += chunk; });
+          res.on('end', () => {
+            if (res.statusCode >= 200 && res.statusCode < 300) {
+              try {
+                resolve(data ? JSON.parse(data) : []);
+              } catch {
+                resolve([]);
+              }
+            } else {
+              console.warn(`[Supabase] ${method} ${pathSuffix} -> ${res.statusCode}: ${data}`);
+              resolve(null);
+            }
+          });
+        });
+        req.on('error', () => resolve(null));
+        if (payload) req.write(payload);
+        req.end();
+      } catch {
+        resolve(null);
+      }
+    });
+  }
+
+  async fetchHighScoresFromSupabase() {
+    const rows = await this.supabaseRequest('GET', 'high_scores?select=*&order=score.desc&limit=50');
+    if (Array.isArray(rows) && rows.length > 0) {
+      this.highScores = rows.map(r => ({
+        id: r.id,
+        name: r.name,
+        score: r.score,
+        difficulty: r.difficulty || 'normal',
+        gameMode: r.game_mode || r.gameMode || 'classic',
+        apples: r.apples || 0,
+        goldenApples: r.golden_apples || r.goldenApples || 0,
+        date: r.date || 'Reciente'
+      })).sort((a, b) => b.score - a.score).slice(0, 50);
+      this.saveHighScoresToDisk();
+      this.broadcastGlobal({
+        type: 'HIGH_SCORES_SYNC',
+        scores: this.highScores
+      });
+      console.log(`[Supabase] ${this.highScores.length} récords cargados desde Supabase.`);
+    }
   }
 
   loadHighScores() {
@@ -657,6 +728,19 @@ class RoomManager {
     this.highScores = filtered.slice(0, 50);
     this.saveHighScoresToDisk();
 
+    if (SUPABASE_KEY) {
+      this.supabaseRequest('POST', 'high_scores', {
+        id: cleanEntry.id,
+        name: cleanEntry.name,
+        score: cleanEntry.score,
+        difficulty: cleanEntry.difficulty,
+        game_mode: cleanEntry.gameMode,
+        apples: cleanEntry.apples,
+        golden_apples: cleanEntry.goldenApples,
+        date: cleanEntry.date
+      }, { 'Prefer': 'resolution=merge-duplicates' });
+    }
+
     this.broadcastGlobal({
       type: 'HIGH_SCORES_SYNC',
       scores: this.highScores
@@ -668,6 +752,9 @@ class RoomManager {
   clearHighScores() {
     this.highScores = [];
     this.saveHighScoresToDisk();
+    if (SUPABASE_KEY) {
+      this.supabaseRequest('DELETE', 'high_scores?id=neq.__none__');
+    }
     this.broadcastGlobal({
       type: 'HIGH_SCORES_SYNC',
       scores: this.highScores
