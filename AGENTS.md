@@ -19,6 +19,8 @@ Este espacio de trabajo cuenta con un arnés de seguridad desacoplado gestionado
 ## Skill de Cierre y Auditoría de Sesión (`/wrap-session`)
 - **Definición**: [`.agents/skills/wrap-session/SKILL.md`](file:///.agents/skills/wrap-session/SKILL.md)
 - **Disparadores**: `/wrap-session`, `"cerramos la sesion"`, `"termina la sesion"`, `"acabamos por hoy"`, `"wrap session"`, `"done for the day"`.
-- **Acción Obligatoria**:
-  1. Generar en `Augus-agy/performance and systems/` los archivos `prompt-log[dia][n].md`, `day-results[dia][n].md` y `error-log[dia][n].md` (documentando prompts con timestamps, resultados por prompt, errores del agente y errores humanos).
-  2. Crear o actualizar la carpeta `docs/` dentro del subdirectorio del proyecto activo con la documentación técnica completa.
+- **Acciones Obligatorias**:
+  1. Generar en `Augus-agy/performance and systems/` los archivos `prompt-log[dia][n].md`, `day-results[dia][n].md`, `error-log[dia][n].md` y `decisionlog.md` / `decisionlog[dia][n].md` (documentando prompts con timestamps, resultados por prompt, errores del agente, errores humanos y decisiones tomadas cuando el agente ofrece opciones).
+  2. Registrar en `decisionlog.md` (tanto en `performance and systems/` como en el proyecto) cada decisión tomada cuando el agente pregunta cómo proseguir y ofrece opciones.
+  3. Registrar en `changelog.md` (dentro del proyecto y en `docs/changelog.md`) todos los cambios realizados a **comportamientos**, **tecnologías** o **código plano** por proyecto.
+  4. Crear o actualizar la carpeta `docs/` dentro del subdirectorio del proyecto activo con la documentación técnica completa.

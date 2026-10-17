@@ -30,3 +30,7 @@ Bienvenido a la documentación oficial de **Snake Arena Multiplayer**, mantenida
    - Detalle del arnés de seguridad `.agents/` (`hooks.json`, `validate_command.js`, `security.md`, `mcp.json.example`).
    - Documentación de la skill `/wrap-session` y el sistema de auditoría `performance and systems/`.
    - Registro histórico de sesiones y modelos de IA utilizados (`Gemini 4 Argon (Medium)`).
+4. [**Bitácora de Decisiones (`decisionlog.md`)**](./decisionlog.md)
+   - Registro de todas las decisiones tomadas cuando el agente consultó cómo proseguir y presentó opciones al usuario.
+5. [**Registro de Cambios (`changelog.md`)**](./changelog.md)
+   - Historial detallado de cambios realizados a **comportamientos**, **tecnologías** y **código plano** en el proyecto.

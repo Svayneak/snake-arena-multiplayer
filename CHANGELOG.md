@@ -1,88 +1,88 @@
-# 📜 REGISTRO DE CAMBIOS (CHANGELOG) - VÍBORA RETRO & SNAKE ARENA
+# Registro de Cambios por Proyecto (`changelog.md`) — `snake-next`
 
-Documento oficial de control de versiones, evolución de arquitectura, arnés de seguridad y despliegue en la nube.
-
----
-
-## 📍 ESTADO ACTUAL DEL PROYECTO
-- **Versión**: `v2.0.0` (Cloud Multiplayer, Live Room Scoreboard, Supabase Persistence & Linux Migration Pack)
-- **Estado**: **DESPLEGADO EN PRODUCCIÓN (LIVE)**
-  - **GitHub**: [https://github.com/Svayneak/snake-arena-multiplayer](https://github.com/Svayneak/snake-arena-multiplayer)
-  - **Render (Juego & WebSocket)**: [https://snake-arena-multiplayer.onrender.com](https://snake-arena-multiplayer.onrender.com)
-  - **Sala de Espectadores**: [https://snake-arena-multiplayer.onrender.com/spectator](https://snake-arena-multiplayer.onrender.com/spectator)
-  - **Base de Datos Cloud**: **Supabase PostgreSQL** (`naacgdwtglvcumaccime` → tabla `public.high_scores` con políticas RLS activas).
+> Bitácora estructurada de todos los cambios realizados en el proyecto **Snake Arena Multiplayer (`snake-next`)**, clasificados en tres dimensiones: **Comportamientos**, **Tecnologías** y **Código Plano**.
 
 ---
 
-## 🗂️ HISTORIAL DE VERSIONES
+## [v2.1.0] — 2026-10-17 — Sistema de Auditoría `/wrap-session`, `decisionlog.md` y Documentación `docs/`
 
-### [v2.0.0] - 2026-10-17 • Marcador Multijugador en Vivo, Persistencia en Supabase & Paquete de Migración a Linux
-#### 🚀 Nuevas Características
-- **Marcador Multijugador en Vivo en la Pantalla del Jugador (`components/SnakeGame.tsx` + `server/relay.js`)**:
-  - El servidor `server/relay.js` ahora retransmite instantáneas `ARENA_SNAPSHOT` (~10 FPS y en eventos de sala) a todos los jugadores conectados además de a los espectadores.
-  - Nueva barra **Marcador en Vivo — Sala** debajo del HUD principal que muestra en tiempo real los puntos, manzanas y estado de cada slot conectado (ej. `#1 PC` vs `#2 Celular`).
-  - Botón directo **`⏱️ Ronda 3..2..1`** en la vista del jugador para lanzar partidas sincronizadas entre todos los dispositivos sin necesidad de abrir `/spectator`.
-- **Cambio de Slot y Apodo en Vivo (`server/relay.js` + `components/SnakeGame.tsx`)**:
-  - Corrección en `registerPlayer` para liberar el slot anterior (`freeSlotHelper`) cuando un jugador con token activo selecciona explícitamente cambiarse a otro slot libre (1 al 6).
-  - Campo de **Nombre / Apodo** integrado directamente en el modal de configuración de Sala y Slot.
-- **Persistencia Permanente en la Nube con Supabase (`server/relay.js` + `render.yaml`)**:
-  - Provisionamiento automático de la tabla `public.high_scores` con Row Level Security (RLS) en Supabase (`https://naacgdwtglvcumaccime.supabase.co`).
-  - Sincronización híbrida de cero dependencias vía módulo nativo `https` de Node.js + respaldo local en `data/high_scores.json` + difusión en tiempo real por WebSocket (`HIGH_SCORES_SYNC`) y endpoint HTTP `/scores`.
-  - Auto-guardado automático al finalizar cada partida con puntaje `> 0` y actualización sin duplicados al personalizar el apodo.
-- **Documentación de Arnés, Modelos y Lanzador para Linux (`HARNESS_Y_MODELOS.md` & `run-linux.sh`)**:
-  - Inclusión del script `run-linux.sh` para iniciar el entorno de desarrollo o producción en Linux con un comando.
-  - Empaquetado portable y sanitizado del arnés `.agents/` (`hooks.json`, `mcp.example.json`, `rules/security.md`, `scripts/validate_command.js`, `scripts/session_resume.js`, `scripts/test_harness.js`) y registro completo de modelos utilizados (`HARNESS_Y_MODELOS.md`).
+### 1. Cambios de Comportamientos
+- **Cierre automatizado de sesión (`/wrap-session`)**: El agente ahora responde a `/wrap-session` y frases naturales (`"cerramos la sesion"`, `"termina la sesion"`, `"acabamos por hoy"`, `"wrap session"`, `"done for the day"`) generando auditorías completas de prompts, resultados, errores (del agente y humanos), decisiones y changelogs.
+- **Trazabilidad de Decisiones (`decisionlog.md`)**: Cada vez que el agente consulta al usuario cómo proseguir y presenta opciones, la alternativa elegida y su impacto quedan registrados en `decisionlog.md`.
+- **Sincronización automática de `docs/`**: La documentación del proyecto dentro de `snake-next/docs/` se crea o actualiza automáticamente al cerrar cada sesión.
+
+### 2. Cambios de Tecnologías
+- **Antigravity Skills System (`.agents/skills/wrap-session/`)**: Incorporación de una skill reutilizable en el workspace con script auxiliar Node.js (`wrap_helper.js`).
+
+### 3. Cambios de Código Plano
+- Creado [`.agents/skills/wrap-session/SKILL.md`](./.agents/skills/wrap-session/SKILL.md) y [`.agents/skills/wrap-session/scripts/wrap_helper.js`](./.agents/skills/wrap-session/scripts/wrap_helper.js).
+- Creada la carpeta [`docs/`](./docs/) con [`docs/README.md`](./docs/README.md), [`docs/ARQUITECTURA.md`](./docs/ARQUITECTURA.md), [`docs/DESPLIEGUE_Y_ENTORNO.md`](./docs/DESPLIEGUE_Y_ENTORNO.md), [`docs/ARNES_Y_SESIONES.md`](./docs/ARNES_Y_SESIONES.md), [`docs/decisionlog.md`](./docs/decisionlog.md) y [`docs/changelog.md`](./docs/changelog.md).
+- Actualizado [`scratch/sync_harness_files.js`](./scratch/sync_harness_files.js) para empaquetar también la skill `/wrap-session` dentro del repositorio.
 
 ---
 
-### [v1.5.0] - 2026-10-16 • Servidor Unificado de Producción (`server/prod.js`) & Blueprint de Render.com
-#### 🚀 Nuevas Características
-- **Servidor Unificado en Puerto Único (`server/prod.js`)**:
-  - Combina el servidor web de Next.js 14 y el servidor WebSocket RFC 6455 en el mismo servidor HTTP y puerto dinámico (`process.env.PORT`), requerido por contenedores cloud como Render.com.
-  - Respuesta automática a tramas WebSocket Ping (`0x09`) con Pong (`0x8A`) para mantener conexiones activas a través de balanceadores cloud.
-- **Blueprint de Despliegue (`render.yaml`)**:
-  - Configuración declarativa para despliegue automático en Render.com (`npm install --include=dev && npm run build` y `npm start`).
-  - Detección automática de protocolo seguro (`wss://`) en `lib/network.ts` cuando el cliente corre sobre HTTPS.
+## [v2.0.0] — 2026-10-17 — Persistencia Permanente en Supabase, Marcador de Sala en Vivo y Soporte Linux
+
+### 1. Cambios de Comportamientos
+- **Persistencia permanente en la nube**: Los récords globales ya no se pierden cuando Render reinicia o suspende el contenedor gratuito; se almacenan permanentemente en PostgreSQL (Supabase) con fallback automático a JSON local y `localStorage`.
+- **Marcador de Sala en Vivo (`Marcador de Sala (En Vivo)`)**: Al jugar en modo multijugador LAN/Online, el panel lateral muestra en tiempo real los puntajes, estado (vivo/muerto/espectador) y longitud de todos los jugadores conectados a la sala actual.
+- **Cambio dinámico de Slot (`switch_slot`)**: Los jugadores y espectadores en una sala pueden cambiar libremente entre los slots `P1..P4` o pasar a modo espectador desde el lobby sin recargar la página; si el Host (`P1`) cambia de slot o se desconecta, el servidor reasigna el rol de Host automáticamente.
+- **Soporte nativo de ejecución en Linux**: Detección automática de IP LAN en Linux y arranque en modo desarrollo o producción con `./run-linux.sh`.
+
+### 2. Cambios de Tecnologías
+- **Supabase PostgreSQL + Row Level Security (RLS)**: Proyecto `naacgdwtglvcumaccime` (`https://naacgdwtglvcumaccime.supabase.co`), tabla `public.high_scores` con políticas RLS para `anon`.
+- **Supabase MCP Server**: Configurado en `.agents/mcp.json` mediante `@supabase/mcp-server-supabase@latest` para reutilización en todo el workspace `Augus-agy`.
+- **Bash Scripting para Linux**: Nuevo lanzador multiplataforma `run-linux.sh`.
+
+### 3. Cambios de Código Plano
+- [`server/prod.js`](./server/prod.js) y [`server/relay.js`](./server/relay.js):
+  - Añadidos helpers `supabaseFetchScores()`, `supabaseInsertScore()` y `supabaseClearScores()`.
+  - Añadido manejo del mensaje WebSocket `switch_slot` y actualización de `score` en vivo dentro de `player_input` y `update_name`.
+- [`lib/network.ts`](./lib/network.ts):
+  - Añadido método `switchSlot(targetSlot)` y envío de `score` en `sendInput()` y `updateName()`.
+- [`lib/storage.ts`](./lib/storage.ts):
+  - Actualizado `fetchServerScores()` para devolver `{ scores, source }` indicando si los datos provienen de `'supabase'`, `'local-file'` o `'local-storage'`.
+- [`components/SnakeGame.tsx`](./components/SnakeGame.tsx) y [`components/Leaderboard.tsx`](./components/Leaderboard.tsx):
+  - Añadidos controles de cambio de slot en el lobby, tabla de posiciones de la sala en vivo y badge de estado `☁️ Supabase Cloud`.
+- [`supabase/schema.sql`](./supabase/schema.sql) y [`scratch/setup_supabase.js`](./scratch/setup_supabase.js):
+  - Script de aprovisionamiento DDL y políticas RLS para `public.high_scores`.
+- [`run-linux.sh`](./run-linux.sh) y [`HARNESS_Y_MODELOS.md`](./HARNESS_Y_MODELOS.md):
+  - Lanzador para sistemas Linux y documentación del arnés `.agents/`.
 
 ---
 
-### [v1.4.0] - 2026-10-16 • Controles Táctiles Móviles, Aislamiento Multi-Sala y Tokens de Reconexión
-#### 🚀 Nuevas Características
-- **Soporte Táctil Completo para Celulares y Tablets (`lib/device.ts`, `lib/touchTracker.ts`, `components/TouchControls.tsx`)**:
-  - Detección dinámica de capacidades táctiles y orientación de pantalla.
-  - Seguimiento continuo del dedo sobre el canvas y soporte de gestos *swipe* + cruceta D-Pad interactiva.
-- **Arquitectura Multi-Sala (`RoomManager` en `server/relay.js`)**:
-  - Creación y aislamiento dinámico de múltiples salas (`ARENA-1`, códigos personalizados) con hasta 6 jugadores por sala.
-  - Generación de tokens criptográficos (`tok_...`) persistidos en `localStorage`/`sessionStorage` para reconexión transparente al mismo slot.
-  - Suite de pruebas unitarias de protocolo (`server/test_relay_rooms.js`).
+## [v1.5.0] — 2026-10-17 — Despliegue Cloud en Render.com y Publicación en GitHub
+
+### 1. Cambios de Comportamientos
+- **Multijugador a través de Internet**: El juego pasó de funcionar únicamente en red local (LAN) a ser accesible públicamente por Internet mediante `https://snake-arena-multiplayer.onrender.com`.
+- **Detección automática de `wss://`**: El cliente detecta si la página corre bajo `https://` y conecta automáticamente por WebSocket seguro (`wss://<host>/ws`) en el mismo puerto del servidor.
+- **Heartbeat anti-desconexión**: El servidor envía tramas `ping` RFC 6455 cada 15 segundos para mantener vivas las conexiones en Render.com.
+
+### 2. Cambios de Tecnologías
+- **Render.com Infrastructure-as-Code (`render.yaml`)**: Despliegue continuo conectado al repositorio `Svayneak/snake-arena-multiplayer`.
+- **Servidor Unificado HTTP + WebSocket (`server/prod.js`)**: Combina el handler de Next.js con el servidor WebSocket RFC 6455 sobre un único puerto (`process.env.PORT`).
+- **GitHub Git Data REST API (`scratch/push_github.js`)**: Publicación directa de blobs, trees y commits desde Node.js sin requerir el binario `git` en Windows.
+
+### 3. Cambios de Código Plano
+- Creado [`server/prod.js`](./server/prod.js) y [`render.yaml`](./render.yaml).
+- Creado [`scratch/push_github.js`](./scratch/push_github.js).
+- Modificado [`lib/network.ts`](./lib/network.ts) para soportar rutas `/ws` sobre `ws://` y `wss://`.
+- Añadidas páginas [`app/spectator/page.tsx`](./app/spectator/page.tsx), [`app/status/page.tsx`](./app/status/page.tsx) y [`app/scores/page.tsx`](./app/scores/page.tsx).
 
 ---
 
-### [v1.3.0] - 2026-10-11 • Snake Arena Multijugador & Sala de Espectadores
-#### 🚀 Nuevas Características
-- **Servidor WebSocket Relay de Cero Dependencias (`server/relay.js`)**:
-  - Implementación nativa basada en RFC 6455 con los módulos de Node.js `http` y `crypto`.
-  - Capacidad para 6 slots simultáneos con retransmisión a 30 FPS (~33 ms).
-  - Simulación de Bots IA autónomos (`CyberViper`, `NeonCobra`, `GlitchPython`, `MatrixAdder`, `QuantumBoa`).
-- **Sala de Espectadores en Vivo (`app/spectator/page.tsx`)**:
-  - Grilla interactiva de 6 mini-arenas en 2x3 (`components/SpectatorGrid.tsx`, `components/SpectatorMiniArena.tsx`) con modo **Spotlight**.
+## [v1.0.0] — 2026-10-17 — Lanzamiento Inicial: Motor Vectorial 360°, Bots IA y Relay LAN
 
----
+### 1. Cambios de Comportamientos
+- **Física continua de 360°**: Movimiento libre por ángulo en radianes con boost de velocidad (consumiendo longitud), partículas de colisión, power-ups y comidas especiales.
+- **Tres modos de juego**: Individual (con Bots IA configurables), Multijugador Local (2 jugadores en teclado/mouse) y Multijugador en Red (hasta 4 jugadores por sala + espectadores).
 
-### [v1.2.0] - 2026-10-11 • Estabilización del Motor, Cero Layout Shift & Telemetría Concurrente
-#### 🐛 Correcciones Críticas
-- **Throttling de la Manzana Dorada**: Reducción de actualizaciones de estado en React de 60 Hz a 1 Hz.
-- **Eliminación Total de Layout Shift**: Contenedor exterior fijo de 44px (`h-11`) para el banner dorado.
-- **Cola Mutex en el Logger de Telemetría (`app/api/telemetry/route.ts`)**.
+### 2. Cambios de Tecnologías
+- **Next.js 14 (App Router) + React 18 + TypeScript + Tailwind CSS**.
+- **HTML5 Canvas API (`requestAnimationFrame` con delta-time)**.
+- **Servidor WebSocket RFC 6455 nativo en Node.js (`crypto` + `http.Server` upgrade)**.
 
----
-
-### [v1.1.0] - 2026-10-10 • Port a Next.js 14 App Router & Telemetría en Servidor
-#### 🚀 Nuevas Características
-- Migración a Next.js 14 (App Router) con TypeScript, Tailwind CSS, sintetizador 8-bit (`lib/audio.ts`) y telemetría en disco.
-
----
-
-### [v1.0.0] - 2026-10-09 • Creación del Motor de Cursor Continuo (Continuous Follower)
-#### 🚀 Características Fundamentales
-- Algoritmo de **Zero-Jump Armed Spawning**, **Tail Inception**, escudo de nacimiento de 1.5s y guardia anti-teletransporte.
+### 3. Cambios de Código Plano
+- Creados [`lib/types.ts`](./lib/types.ts), [`lib/engine.ts`](./lib/engine.ts), [`lib/sound.ts`](./lib/sound.ts), [`lib/storage.ts`](./lib/storage.ts) y [`lib/network.ts`](./lib/network.ts).
+- Creados [`components/SnakeGame.tsx`](./components/SnakeGame.tsx), [`components/SpectatorView.tsx`](./components/SpectatorView.tsx) y [`components/Leaderboard.tsx`](./components/Leaderboard.tsx).
+- Creado [`server/relay.js`](./server/relay.js) y [`run-lan.bat`](./run-lan.bat).
