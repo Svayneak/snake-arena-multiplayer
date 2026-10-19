@@ -631,12 +631,18 @@ class ArenaRoom {
     try {
       if (typeof socket.send === 'function') {
         if (socket.readyState === 1) {
-          socket.send(JSON.stringify(payload));
+          socket.send(JSON.stringify(payload), (err) => {
+            if (err) roomManager.logDebug({ event: 'send_callback_error', error: err.message });
+          });
+        } else {
+          roomManager.logDebug({ event: 'send_not_open', readyState: socket.readyState });
         }
       } else {
         socket.write(encodeFrame(JSON.stringify(payload)));
       }
-    } catch {}
+    } catch (err) {
+      roomManager.logDebug({ event: 'send_exception', error: err.message });
+    }
   }
 }
 
@@ -647,12 +653,19 @@ class RoomManager {
     // Socket -> { roomId, isSpectator, isPlayer }
     this.socketMap = new Map();
     this.highScores = this.loadHighScores();
+    this.debugLog = [];
     // Crear sala por defecto
     this.getOrCreateRoom(DEFAULT_ROOM_ID);
     // Si hay llave de Supabase configurada, sincronizar con la nube al iniciar
     if (SUPABASE_KEY) {
       this.fetchHighScoresFromSupabase();
     }
+  }
+
+  logDebug(event) {
+    if (!this.debugLog) this.debugLog = [];
+    this.debugLog.push({ ...event, time: new Date().toISOString() });
+    if (this.debugLog.length > 30) this.debugLog.shift();
   }
 
   supabaseRequest(method, pathSuffix, body = null, extraHeaders = {}) {
@@ -901,12 +914,13 @@ class RoomManager {
     }
     return {
       status: 'online',
-      version: '2.1.0-ws',
+      version: '2.1.1-debug',
       service: 'Snake Arena Multi-Room WebSocket Relay',
       port: PORT,
       totalRooms: this.rooms.size,
       rooms: roomsData,
-      highScoresCount: this.highScores.length
+      highScoresCount: this.highScores.length,
+      debugLog: this.debugLog || []
     };
   }
 }

@@ -80,24 +80,31 @@ app.prepare().then(() => {
 
   const wss = new WebSocketServer({ server });
 
-  wss.on('connection', (socket) => {
+  wss.on('connection', (socket, req) => {
+    roomManager.logDebug({ 
+      event: 'wss_connection', 
+      headers: req ? { host: req.headers.host, upgrade: req.headers.upgrade, connection: req.headers.connection } : null 
+    });
     socket.isAlive = true;
     socket.on('pong', () => { socket.isAlive = true; });
 
     socket.on('message', (message) => {
       try {
         const data = JSON.parse(message.toString());
+        roomManager.logDebug({ event: 'ws_message', type: data.type, roomId: data.roomId, slotId: data.slotId });
         handleClientMessage(socket, data);
       } catch (err) {
-        console.error('[!] Invalid JSON received:', err.message);
+        roomManager.logDebug({ event: 'ws_json_error', error: err.message });
       }
     });
 
-    socket.on('close', () => {
+    socket.on('close', (code, reason) => {
+      roomManager.logDebug({ event: 'ws_close', code, reason: reason ? reason.toString() : '' });
       roomManager.handleDisconnect(socket);
     });
 
-    socket.on('error', () => {
+    socket.on('error', (err) => {
+      roomManager.logDebug({ event: 'ws_error', error: err ? (err.message || String(err)) : 'unknown' });
       roomManager.handleDisconnect(socket);
     });
   });
