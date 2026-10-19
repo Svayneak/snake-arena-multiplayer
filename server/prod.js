@@ -6,7 +6,6 @@
 
 const http = require('http');
 const path = require('path');
-const crypto = require('crypto');
 const next = require('next');
 const { WebSocketServer } = require('ws');
 const { 
@@ -26,6 +25,21 @@ const handle = app.getRequestHandler();
 
 app.prepare().then(() => {
   const server = http.createServer((req, res) => {
+    // Intercept WebSocket upgrade requests that reach the HTTP request listener
+    // to prevent Next.js from rendering an HTML response and closing the socket!
+    if (req.headers.upgrade && req.headers.upgrade.toLowerCase() === 'websocket') {
+      roomManager.logDebug({
+        event: 'http_request_with_upgrade_intercepted',
+        url: req.url,
+        headers: {
+          host: req.headers.host,
+          upgrade: req.headers.upgrade,
+          connection: req.headers.connection
+        }
+      });
+      return;
+    }
+
     // Custom Relay Health & Status Endpoints
     if (req.url === '/relay/status' || req.url === '/status') {
       res.setHeader('Access-Control-Allow-Origin', '*');
@@ -74,17 +88,70 @@ app.prepare().then(() => {
       }
     }
 
+    // If a request hits /ws directly without upgrade headers, return 426 Upgrade Required
+    if (req.url === '/ws' || req.url === '/relay') {
+      res.writeHead(426, { 'Upgrade': 'WebSocket', 'Content-Type': 'text/plain' });
+      res.end('Upgrade Required');
+      return;
+    }
+
     // Next.js handles all static assets, pages and API routes
     handle(req, res);
   });
 
-  const wss = new WebSocketServer({ server });
+  // Use noServer: true to cleanly decouple WebSocket upgrades from the HTTP server
+  const wss = new WebSocketServer({ noServer: true });
+
+  server.on('upgrade', (req, socket, head) => {
+    // Intercept and instrument socket.end and socket.destroy to track stream lifecycle
+    const origEnd = socket.end;
+    socket.end = function(...args) {
+      roomManager.logDebug({
+        event: 'socket_end_called',
+        writableEnded: this.writableEnded,
+        destroyed: this.destroyed,
+        stack: (new Error().stack || '').split('\n').slice(1, 5).map(s => s.trim()).join(' -> ')
+      });
+      return origEnd.apply(this, args);
+    };
+
+    const origDestroy = socket.destroy;
+    socket.destroy = function(...args) {
+      roomManager.logDebug({
+        event: 'socket_destroy_called',
+        stack: (new Error().stack || '').split('\n').slice(1, 5).map(s => s.trim()).join(' -> ')
+      });
+      return origDestroy.apply(this, args);
+    };
+
+    socket.on('end', () => {
+      roomManager.logDebug({ event: 'socket_emitted_end' });
+    });
+
+    // Handle WebSocket upgrade
+    wss.handleUpgrade(req, socket, head, (ws) => {
+      wss.emit('connection', ws, req);
+    });
+  });
 
   wss.on('connection', (socket, req) => {
+    const rawSocket = socket._socket;
     roomManager.logDebug({ 
       event: 'wss_connection', 
-      headers: req ? { host: req.headers.host, upgrade: req.headers.upgrade, connection: req.headers.connection } : null 
+      url: req ? req.url : null,
+      rawSocketState: rawSocket ? {
+        writable: rawSocket.writable,
+        writableEnded: rawSocket.writableEnded,
+        destroyed: rawSocket.destroyed,
+        readyState: socket.readyState
+      } : null,
+      headers: req ? { 
+        host: req.headers.host, 
+        upgrade: req.headers.upgrade, 
+        connection: req.headers.connection 
+      } : null 
     });
+
     socket.isAlive = true;
     socket.on('pong', () => { socket.isAlive = true; });
 

@@ -564,7 +564,10 @@ class ArenaRoom {
     for (const socket of this.spectators) {
       try {
         if (typeof socket.send === 'function') {
-          if (socket.readyState === 1) socket.send(jsonStr);
+          const raw = socket._socket;
+          if (socket.readyState === 1 && (!raw || (!raw.writableEnded && !raw.destroyed))) {
+            socket.send(jsonStr);
+          }
         } else {
           if (!encodedBuf) encodedBuf = encodeFrame(jsonStr);
           socket.write(encodedBuf);
@@ -577,7 +580,10 @@ class ArenaRoom {
       for (const [socket] of this.players) {
         try {
           if (typeof socket.send === 'function') {
-            if (socket.readyState === 1) socket.send(jsonStr);
+            const raw = socket._socket;
+            if (socket.readyState === 1 && (!raw || (!raw.writableEnded && !raw.destroyed))) {
+              socket.send(jsonStr);
+            }
           } else {
             if (!encodedBuf) encodedBuf = encodeFrame(jsonStr);
             socket.write(encodedBuf);
@@ -593,7 +599,10 @@ class ArenaRoom {
     for (const socket of this.spectators) {
       try {
         if (typeof socket.send === 'function') {
-          if (socket.readyState === 1) socket.send(jsonStr);
+          const raw = socket._socket;
+          if (socket.readyState === 1 && (!raw || (!raw.writableEnded && !raw.destroyed))) {
+            socket.send(jsonStr);
+          }
         } else {
           if (!encodedBuf) encodedBuf = encodeFrame(jsonStr);
           socket.write(encodedBuf);
@@ -603,7 +612,10 @@ class ArenaRoom {
     for (const [socket] of this.players) {
       try {
         if (typeof socket.send === 'function') {
-          if (socket.readyState === 1) socket.send(jsonStr);
+          const raw = socket._socket;
+          if (socket.readyState === 1 && (!raw || (!raw.writableEnded && !raw.destroyed))) {
+            socket.send(jsonStr);
+          }
         } else {
           if (!encodedBuf) encodedBuf = encodeFrame(jsonStr);
           socket.write(encodedBuf);
@@ -618,7 +630,10 @@ class ArenaRoom {
     for (const socket of this.spectators) {
       try {
         if (typeof socket.send === 'function') {
-          if (socket.readyState === 1) socket.send(jsonStr);
+          const raw = socket._socket;
+          if (socket.readyState === 1 && (!raw || (!raw.writableEnded && !raw.destroyed))) {
+            socket.send(jsonStr);
+          }
         } else {
           if (!encodedBuf) encodedBuf = encodeFrame(jsonStr);
           socket.write(encodedBuf);
@@ -630,9 +645,25 @@ class ArenaRoom {
   send(socket, payload) {
     try {
       if (typeof socket.send === 'function') {
+        const rawSocket = socket._socket;
         if (socket.readyState === 1) {
+          if (rawSocket && (rawSocket.writableEnded || rawSocket.destroyed)) {
+            roomManager.logDebug({
+              event: 'send_skipped_writable_ended',
+              writableEnded: rawSocket.writableEnded,
+              destroyed: rawSocket.destroyed
+            });
+            return;
+          }
           socket.send(JSON.stringify(payload), (err) => {
-            if (err) roomManager.logDebug({ event: 'send_callback_error', error: err.message });
+            if (err) {
+              roomManager.logDebug({
+                event: 'send_callback_error',
+                error: err.message,
+                writableEnded: rawSocket ? rawSocket.writableEnded : null,
+                destroyed: rawSocket ? rawSocket.destroyed : null
+              });
+            }
           });
         } else {
           roomManager.logDebug({ event: 'send_not_open', readyState: socket.readyState });
@@ -914,7 +945,7 @@ class RoomManager {
     }
     return {
       status: 'online',
-      version: '2.1.1-debug',
+      version: '2.1.2-fix',
       service: 'Snake Arena Multi-Room WebSocket Relay',
       port: PORT,
       totalRooms: this.rooms.size,
@@ -926,96 +957,6 @@ class RoomManager {
 }
 
 const roomManager = new RoomManager();
-
-// ==================== HTTP & WEBSOCKET SERVER ====================
-const server = http.createServer((req, res) => {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-
-  if (req.method === 'OPTIONS') {
-    res.writeHead(200);
-    res.end();
-    return;
-  }
-
-  if (req.url === '/health' || req.url === '/status') {
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify(roomManager.getStatus()));
-    return;
-  }
-
-  if (req.url === '/scores' || req.url === '/relay/scores') {
-    if (req.method === 'GET') {
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ scores: roomManager.getHighScores() }));
-      return;
-    }
-    if (req.method === 'DELETE') {
-      const updated = roomManager.clearHighScores();
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ scores: updated }));
-      return;
-    }
-    if (req.method === 'POST') {
-      let body = '';
-      req.on('data', chunk => { body += chunk; });
-      req.on('end', () => {
-        try {
-          const parsed = JSON.parse(body || '{}');
-          const updated = roomManager.addHighScore(parsed);
-          res.writeHead(200, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ scores: updated }));
-        } catch {
-          res.writeHead(400, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ error: 'Invalid JSON' }));
-        }
-      });
-      return;
-    }
-  }
-
-  res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
-  res.end(`Snake Arena Multi-Room WebSocket Relay Server activo en puerto ${PORT}.\nSalas activas: ${roomManager.rooms.size}`);
-});
-
-const wss = new WebSocketServer({ server });
-
-wss.on('connection', (socket) => {
-  socket.isAlive = true;
-  socket.on('pong', () => { socket.isAlive = true; });
-
-  socket.on('message', (message) => {
-    try {
-      const data = JSON.parse(message.toString());
-      handleClientMessage(socket, data);
-    } catch (err) {
-      console.error('[!] Invalid JSON received:', err.message);
-    }
-  });
-
-  socket.on('close', () => {
-    roomManager.handleDisconnect(socket);
-  });
-
-  socket.on('error', () => {
-    roomManager.handleDisconnect(socket);
-  });
-});
-
-const pingInterval = setInterval(() => {
-  for (const client of wss.clients) {
-    if (client.isAlive === false) {
-      roomManager.handleDisconnect(client);
-      try { client.terminate(); } catch {}
-      continue;
-    }
-    client.isAlive = false;
-    try { client.ping(); } catch {}
-  }
-}, 25000);
-
-wss.on('close', () => clearInterval(pingInterval));
 
 function handleClientMessage(socket, data) {
   const targetRoomId = roomManager.sanitizeRoomId(data.roomId);
@@ -1084,7 +1025,99 @@ function handleClientMessage(socket, data) {
   }
 }
 
+// ==================== HTTP & WEBSOCKET SERVER (STANDALONE RELAY) ====================
+let server = null;
+
 if (require.main === module) {
+  server = http.createServer((req, res) => {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+    if (req.method === 'OPTIONS') {
+      res.writeHead(200);
+      res.end();
+      return;
+    }
+
+    if (req.url === '/health' || req.url === '/status') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(roomManager.getStatus()));
+      return;
+    }
+
+    if (req.url === '/scores' || req.url === '/relay/scores') {
+      if (req.method === 'GET') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ scores: roomManager.getHighScores() }));
+        return;
+      }
+      if (req.method === 'DELETE') {
+        const updated = roomManager.clearHighScores();
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ scores: updated }));
+        return;
+      }
+      if (req.method === 'POST') {
+        let body = '';
+        req.on('data', chunk => { body += chunk; });
+        req.on('end', () => {
+          try {
+            const parsed = JSON.parse(body || '{}');
+            const updated = roomManager.addHighScore(parsed);
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ scores: updated }));
+          } catch {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Invalid JSON' }));
+          }
+        });
+        return;
+      }
+    }
+
+    res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
+    res.end(`Snake Arena Multi-Room WebSocket Relay Server activo en puerto ${PORT}.\nSalas activas: ${roomManager.rooms.size}`);
+  });
+
+  const wss = new WebSocketServer({ server });
+
+  wss.on('connection', (socket) => {
+    socket.isAlive = true;
+    socket.on('pong', () => { socket.isAlive = true; });
+
+    socket.on('message', (message) => {
+      try {
+        const data = JSON.parse(message.toString());
+        handleClientMessage(socket, data);
+      } catch (err) {
+        console.error('[!] Invalid JSON received:', err.message);
+      }
+    });
+
+    socket.on('close', () => {
+      roomManager.handleDisconnect(socket);
+    });
+
+    socket.on('error', () => {
+      roomManager.handleDisconnect(socket);
+    });
+  });
+
+  const pingInterval = setInterval(() => {
+    for (const client of wss.clients) {
+      if (client.isAlive === false) {
+        roomManager.handleDisconnect(client);
+        try { client.terminate(); } catch {}
+        continue;
+      }
+      client.isAlive = false;
+      try { client.ping(); } catch {}
+    }
+  }, 25000);
+
+  wss.on('close', () => clearInterval(pingInterval));
+
   // 30 FPS Multi-Room Loop (Bots update & Spectator Broadcast por sala)
   setInterval(() => {
     roomManager.updateAll();
