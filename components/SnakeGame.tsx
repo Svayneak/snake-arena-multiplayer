@@ -448,6 +448,22 @@ export const SnakeGameComponent: React.FC = () => {
   // Keyboard controls
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // 1. Never trigger keyboard shortcuts when typing in an input, textarea, or editable element
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
+
+      // 2. Do not trigger gameplay shortcuts when a modal dialog is open (e.g. Room Switcher)
+      if (isRoomSwitcherOpen) {
+        return;
+      }
+
       const game = gameRef.current;
       if (!game) return;
 
@@ -495,7 +511,7 @@ export const SnakeGameComponent: React.FC = () => {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [controlType, gameState]);
+  }, [controlType, gameState, isRoomSwitcherOpen]);
 
   // Save Score from Game Over
   const handleSaveScore = () => {
@@ -664,33 +680,35 @@ export const SnakeGameComponent: React.FC = () => {
       </div>
 
       {/* Live Multiplayer Room Scoreboard */}
-      <div className="w-full rounded-xl bg-slate-900/75 border border-slate-800/90 px-3 py-2 mb-2">
-        <div className="flex flex-wrap items-center justify-between gap-2 mb-1.5">
-          <div className="flex items-center gap-2 text-xs">
-            <Users className="h-3.5 w-3.5 text-emerald-400" />
-            <span className="font-bold text-slate-200">
-              Marcador en Vivo — Sala <span className="font-mono text-emerald-400">{roomId}</span>
+      <div className="w-full rounded-xl bg-slate-900/75 border border-slate-800/90 p-2.5 mb-2">
+        <div className="flex items-center justify-between gap-2 mb-2 min-h-[26px]">
+          <div className="flex items-center gap-1.5 min-w-0">
+            <Users className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
+            <span className="font-bold text-slate-200 text-xs whitespace-nowrap">
+              Sala <span className="font-mono text-emerald-400">{roomId}</span>
             </span>
-            <span className="text-[11px] text-slate-400">
-              ({roomSlots.filter(s => s.connected).length} jugador{roomSlots.filter(s => s.connected).length === 1 ? '' : 'es'} conectado{roomSlots.filter(s => s.connected).length === 1 ? '' : 's'})
+            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-slate-800 text-slate-300 border border-slate-700/80 whitespace-nowrap font-medium flex items-center gap-1 shrink-0">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              {roomSlots.filter(s => s.connected).length} {roomSlots.filter(s => s.connected).length === 1 ? 'jugador' : 'jugadores'}
             </span>
           </div>
-          <div className="flex items-center gap-1.5">
+
+          <div className="flex items-center gap-1.5 shrink-0">
             <button
               type="button"
               onClick={() => setShowBotsInBar(!showBotsInBar)}
-              className={`px-2 py-0.5 rounded text-[11px] font-semibold border transition ${
+              className={`px-2 py-0.5 rounded text-[10px] sm:text-[11px] font-semibold border transition ${
                 showBotsInBar
                   ? 'bg-sky-500/20 text-sky-300 border-sky-500/40'
                   : 'bg-slate-800 text-slate-400 border-slate-700 hover:text-slate-200'
               }`}
             >
-              {showBotsInBar ? '🤖 Ocultar Bots' : '🤖 Ver Bots'}
+              {showBotsInBar ? '🤖 Ocultar Bots' : '🤖 Bots'}
             </button>
             <button
               type="button"
               onClick={() => arenaNet.startCountdown(3)}
-              className="px-2.5 py-0.5 rounded bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 text-[11px] font-bold transition"
+              className="px-2.5 py-0.5 rounded bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 text-[10px] sm:text-[11px] font-bold transition whitespace-nowrap"
               title="Iniciar cuenta regresiva 3..2..1 en todos los dispositivos de la sala"
             >
               ⏱️ Ronda 3..2..1
@@ -698,7 +716,7 @@ export const SnakeGameComponent: React.FC = () => {
           </div>
         </div>
 
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2">
+        <div className="flex items-stretch gap-2 overflow-x-auto pb-0.5 no-scrollbar sm:grid sm:grid-cols-3 md:grid-cols-6 sm:overflow-visible">
           {visibleRoomSlots.map((s) => {
             const isMe = s.slotId === slotId;
             const displayScore = isMe ? score : s.score;
@@ -712,7 +730,7 @@ export const SnakeGameComponent: React.FC = () => {
                     arenaNet.connect(s.slotId, playerName || `Piloto #${s.slotId}`, roomId);
                   }
                 }}
-                className={`rounded-lg px-2.5 py-1.5 border text-xs flex flex-col justify-between transition ${
+                className={`rounded-lg px-2.5 py-1.5 border text-xs flex flex-col justify-between transition min-w-[130px] flex-1 sm:min-w-0 h-[52px] ${
                   isMe
                     ? 'bg-emerald-500/15 border-emerald-500/50 text-emerald-200 shadow-sm'
                     : s.connected
@@ -721,14 +739,14 @@ export const SnakeGameComponent: React.FC = () => {
                 }`}
               >
                 <div className="flex items-center justify-between gap-1">
-                  <span className="font-mono font-bold text-[11px] text-amber-300">
+                  <span className="font-mono font-bold text-[11px] text-amber-300 shrink-0">
                     #{s.slotId}
                   </span>
                   <span className="truncate font-semibold text-[11px] flex-1">
                     {isMe ? (playerName && playerName !== 'SnakePilot' ? playerName : s.name) : s.name}
                   </span>
                   {isMe && (
-                    <span className="px-1 rounded bg-emerald-500/30 text-emerald-300 text-[9px] font-bold">
+                    <span className="px-1 rounded bg-emerald-500/30 text-emerald-300 text-[9px] font-bold shrink-0">
                       TÚ
                     </span>
                   )}
@@ -946,6 +964,12 @@ export const SnakeGameComponent: React.FC = () => {
                   maxLength={16}
                   value={playerName}
                   onChange={(e) => setPlayerName(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleSaveScore();
+                    }
+                  }}
                   placeholder="Tu apodo..."
                   disabled={scoreSaved}
                   className="flex-1 rounded-lg bg-slate-800 border border-slate-700 px-3 py-2 text-sm text-white focus:outline-none focus:border-amber-400 disabled:opacity-50"
