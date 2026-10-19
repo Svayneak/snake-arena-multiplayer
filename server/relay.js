@@ -901,6 +901,7 @@ class RoomManager {
     }
     return {
       status: 'online',
+      version: '2.1.0-ws',
       service: 'Snake Arena Multi-Room WebSocket Relay',
       port: PORT,
       totalRooms: this.rooms.size,
