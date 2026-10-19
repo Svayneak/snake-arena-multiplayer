@@ -74,7 +74,7 @@ export class ArenaNetworkClient {
         const protocol = isSecure ? 'wss:' : 'ws:';
         // En Render / producción / dominios Cloudflare (HTTPS):
         if (isSecure || !window.location.port || window.location.port === '80' || window.location.port === '443') {
-          this.url = `${protocol}//${window.location.host}`;
+          this.url = `${protocol}//${window.location.host}/ws`;
         } else {
           // En desarrollo local (soporta relay en 3500)
           const host = window.location.hostname || 'localhost';

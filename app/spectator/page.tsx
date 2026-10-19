@@ -58,7 +58,7 @@ export default function SpectatorPage() {
       let url: string;
 
       if (isSecure || !window.location.port || window.location.port === '80' || window.location.port === '443') {
-        url = `${protocol}//${window.location.host}`;
+        url = `${protocol}//${window.location.host}/ws`;
       } else {
         const host = window.location.hostname || 'localhost';
         url = `${protocol}//${host}:3500`;

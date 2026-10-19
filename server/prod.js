@@ -21,6 +21,12 @@ const dev = process.env.NODE_ENV !== 'production';
 
 // Initialize Next.js app in production mode
 const app = next({ dev, dir: path.resolve(__dirname, '..') });
+
+// IMPORTANT: Prevent Next.js NextCustomServer from registering its internal upgradeHandler!
+// Next.js's router-server.js upgradeHandler checks if the URL matches any app page (like "/" or "/spectator")
+// and forcibly calls socket.end(), destroying WebSocket connections!
+app.didWebSocketSetup = true;
+
 const handle = app.getRequestHandler();
 
 app.prepare().then(() => {
@@ -28,15 +34,6 @@ app.prepare().then(() => {
     // Intercept WebSocket upgrade requests that reach the HTTP request listener
     // to prevent Next.js from rendering an HTML response and closing the socket!
     if (req.headers.upgrade && req.headers.upgrade.toLowerCase() === 'websocket') {
-      roomManager.logDebug({
-        event: 'http_request_with_upgrade_intercepted',
-        url: req.url,
-        headers: {
-          host: req.headers.host,
-          upgrade: req.headers.upgrade,
-          connection: req.headers.connection
-        }
-      });
       return;
     }
 
@@ -99,52 +96,33 @@ app.prepare().then(() => {
     handle(req, res);
   });
 
+  // Guard server.on against Next.js upgradeHandler hijacking
+  const origServerOn = server.on.bind(server);
+  server.on = function(event, listener) {
+    if (event === 'upgrade') {
+      const fnStr = (listener && listener.toString) ? listener.toString() : '';
+      if (fnStr.includes('upgradeHandler') || listener.name === 'upgradeHandler') {
+        roomManager.logDebug({ event: 'blocked_nextjs_upgrade_handler' });
+        return this;
+      }
+    }
+    return origServerOn(event, listener);
+  };
+
   // Use noServer: true to cleanly decouple WebSocket upgrades from the HTTP server
   const wss = new WebSocketServer({ noServer: true });
 
   server.on('upgrade', (req, socket, head) => {
-    // Intercept and instrument socket.end and socket.destroy to track stream lifecycle
-    const origEnd = socket.end;
-    socket.end = function(...args) {
-      roomManager.logDebug({
-        event: 'socket_end_called',
-        writableEnded: this.writableEnded,
-        destroyed: this.destroyed,
-        stack: (new Error().stack || '').split('\n').slice(1, 5).map(s => s.trim()).join(' -> ')
-      });
-      return origEnd.apply(this, args);
-    };
-
-    const origDestroy = socket.destroy;
-    socket.destroy = function(...args) {
-      roomManager.logDebug({
-        event: 'socket_destroy_called',
-        stack: (new Error().stack || '').split('\n').slice(1, 5).map(s => s.trim()).join(' -> ')
-      });
-      return origDestroy.apply(this, args);
-    };
-
-    socket.on('end', () => {
-      roomManager.logDebug({ event: 'socket_emitted_end' });
-    });
-
-    // Handle WebSocket upgrade
+    // Handle WebSocket upgrade cleanly
     wss.handleUpgrade(req, socket, head, (ws) => {
       wss.emit('connection', ws, req);
     });
   });
 
   wss.on('connection', (socket, req) => {
-    const rawSocket = socket._socket;
     roomManager.logDebug({ 
       event: 'wss_connection', 
       url: req ? req.url : null,
-      rawSocketState: rawSocket ? {
-        writable: rawSocket.writable,
-        writableEnded: rawSocket.writableEnded,
-        destroyed: rawSocket.destroyed,
-        readyState: socket.readyState
-      } : null,
       headers: req ? { 
         host: req.headers.host, 
         upgrade: req.headers.upgrade, 
@@ -158,7 +136,9 @@ app.prepare().then(() => {
     socket.on('message', (message) => {
       try {
         const data = JSON.parse(message.toString());
-        roomManager.logDebug({ event: 'ws_message', type: data.type, roomId: data.roomId, slotId: data.slotId });
+        if (data.type !== 'TELEMETRY_FRAME') {
+          roomManager.logDebug({ event: 'ws_message', type: data.type, roomId: data.roomId, slotId: data.slotId });
+        }
         handleClientMessage(socket, data);
       } catch (err) {
         roomManager.logDebug({ event: 'ws_json_error', error: err.message });
