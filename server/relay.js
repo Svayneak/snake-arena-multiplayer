@@ -13,6 +13,7 @@ const https = require('https');
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
+const { WebSocketServer } = require('ws');
 
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3500;
 const MAX_SLOTS = 6;
@@ -241,7 +242,11 @@ class ArenaRoom {
       for (const [existingSocket, pInfo] of this.players.entries()) {
         if (pInfo.token === token && existingSocket !== socket) {
           try {
-            existingSocket.end();
+            if (typeof existingSocket.close === 'function') {
+              existingSocket.close();
+            } else if (typeof existingSocket.end === 'function') {
+              existingSocket.end();
+            }
           } catch {}
           this.players.delete(existingSocket);
         }
@@ -553,10 +558,17 @@ class ArenaRoom {
       activeCountdown: this.countdown ? this.countdown.count : null
     };
 
-    const encoded = encodeFrame(JSON.stringify(payload));
+    const jsonStr = JSON.stringify(payload);
+    let encodedBuf = null;
+
     for (const socket of this.spectators) {
       try {
-        socket.write(encoded);
+        if (typeof socket.send === 'function') {
+          if (socket.readyState === 1) socket.send(jsonStr);
+        } else {
+          if (!encodedBuf) encodedBuf = encodeFrame(jsonStr);
+          socket.write(encodedBuf);
+        }
       } catch {}
     }
 
@@ -564,32 +576,66 @@ class ArenaRoom {
     if (forcePlayers || this.snapshotTick === 0) {
       for (const [socket] of this.players) {
         try {
-          socket.write(encoded);
+          if (typeof socket.send === 'function') {
+            if (socket.readyState === 1) socket.send(jsonStr);
+          } else {
+            if (!encodedBuf) encodedBuf = encodeFrame(jsonStr);
+            socket.write(encodedBuf);
+          }
         } catch {}
       }
     }
   }
 
   broadcastAll(payload) {
-    const encoded = encodeFrame(JSON.stringify(payload));
+    const jsonStr = JSON.stringify(payload);
+    let encodedBuf = null;
     for (const socket of this.spectators) {
-      try { socket.write(encoded); } catch {}
+      try {
+        if (typeof socket.send === 'function') {
+          if (socket.readyState === 1) socket.send(jsonStr);
+        } else {
+          if (!encodedBuf) encodedBuf = encodeFrame(jsonStr);
+          socket.write(encodedBuf);
+        }
+      } catch {}
     }
     for (const [socket] of this.players) {
-      try { socket.write(encoded); } catch {}
+      try {
+        if (typeof socket.send === 'function') {
+          if (socket.readyState === 1) socket.send(jsonStr);
+        } else {
+          if (!encodedBuf) encodedBuf = encodeFrame(jsonStr);
+          socket.write(encodedBuf);
+        }
+      } catch {}
     }
   }
 
   broadcastToSpectators(payload) {
-    const encoded = encodeFrame(JSON.stringify(payload));
+    const jsonStr = JSON.stringify(payload);
+    let encodedBuf = null;
     for (const socket of this.spectators) {
-      try { socket.write(encoded); } catch {}
+      try {
+        if (typeof socket.send === 'function') {
+          if (socket.readyState === 1) socket.send(jsonStr);
+        } else {
+          if (!encodedBuf) encodedBuf = encodeFrame(jsonStr);
+          socket.write(encodedBuf);
+        }
+      } catch {}
     }
   }
 
   send(socket, payload) {
     try {
-      socket.write(encodeFrame(JSON.stringify(payload)));
+      if (typeof socket.send === 'function') {
+        if (socket.readyState === 1) {
+          socket.send(JSON.stringify(payload));
+        }
+      } else {
+        socket.write(encodeFrame(JSON.stringify(payload)));
+      }
     } catch {}
   }
 }
@@ -763,13 +809,28 @@ class RoomManager {
   }
 
   broadcastGlobal(payload) {
-    const encoded = encodeFrame(JSON.stringify(payload));
+    const jsonStr = JSON.stringify(payload);
+    let encodedBuf = null;
     for (const room of this.rooms.values()) {
       for (const socket of room.spectators) {
-        try { socket.write(encoded); } catch {}
+        try {
+          if (typeof socket.send === 'function') {
+            if (socket.readyState === 1) socket.send(jsonStr);
+          } else {
+            if (!encodedBuf) encodedBuf = encodeFrame(jsonStr);
+            socket.write(encodedBuf);
+          }
+        } catch {}
       }
       for (const [socket] of room.players) {
-        try { socket.write(encoded); } catch {}
+        try {
+          if (typeof socket.send === 'function') {
+            if (socket.readyState === 1) socket.send(jsonStr);
+          } else {
+            if (!encodedBuf) encodedBuf = encodeFrame(jsonStr);
+            socket.write(encodedBuf);
+          }
+        } catch {}
       }
     }
   }
@@ -903,46 +964,18 @@ const server = http.createServer((req, res) => {
   res.end(`Snake Arena Multi-Room WebSocket Relay Server activo en puerto ${PORT}.\nSalas activas: ${roomManager.rooms.size}`);
 });
 
-server.on('upgrade', (req, socket) => {
-  const key = req.headers['sec-websocket-key'];
-  if (!key) {
-    socket.destroy();
-    return;
-  }
+const wss = new WebSocketServer({ server });
 
-  const acceptKey = crypto
-    .createHash('sha1')
-    .update(key + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11')
-    .digest('base64');
+wss.on('connection', (socket) => {
+  socket.isAlive = true;
+  socket.on('pong', () => { socket.isAlive = true; });
 
-  socket.write(
-    'HTTP/1.1 101 Switching Protocols\r\n' +
-    'Upgrade: websocket\r\n' +
-    'Connection: Upgrade\r\n' +
-    `Sec-WebSocket-Accept: ${acceptKey}\r\n\r\n`
-  );
-
-  let incomingBuffer = Buffer.alloc(0);
-
-  socket.on('data', chunk => {
-    incomingBuffer = Buffer.concat([incomingBuffer, chunk]);
-    const { messages, remaining } = decodeFrames(incomingBuffer);
-    incomingBuffer = remaining;
-
-    for (const msg of messages) {
-      if (msg.type === 'text') {
-        try {
-          const data = JSON.parse(msg.text);
-          handleClientMessage(socket, data);
-        } catch (err) {
-          console.error('[!] Invalid JSON received:', err.message);
-        }
-      } else if (msg.type === 'ping') {
-        try { socket.write(Buffer.from([0x8a, 0x00])); } catch {}
-      } else if (msg.type === 'close') {
-        roomManager.handleDisconnect(socket);
-        socket.end();
-      }
+  socket.on('message', (message) => {
+    try {
+      const data = JSON.parse(message.toString());
+      handleClientMessage(socket, data);
+    } catch (err) {
+      console.error('[!] Invalid JSON received:', err.message);
     }
   });
 
@@ -954,6 +987,20 @@ server.on('upgrade', (req, socket) => {
     roomManager.handleDisconnect(socket);
   });
 });
+
+const pingInterval = setInterval(() => {
+  for (const client of wss.clients) {
+    if (client.isAlive === false) {
+      roomManager.handleDisconnect(client);
+      try { client.terminate(); } catch {}
+      continue;
+    }
+    client.isAlive = false;
+    try { client.ping(); } catch {}
+  }
+}, 25000);
+
+wss.on('close', () => clearInterval(pingInterval));
 
 function handleClientMessage(socket, data) {
   const targetRoomId = roomManager.sanitizeRoomId(data.roomId);

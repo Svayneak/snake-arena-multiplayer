@@ -8,6 +8,7 @@ const http = require('http');
 const path = require('path');
 const crypto = require('crypto');
 const next = require('next');
+const { WebSocketServer } = require('ws');
 const { 
   RoomManager, 
   roomManager, 
@@ -77,47 +78,18 @@ app.prepare().then(() => {
     handle(req, res);
   });
 
-  // Handle RFC 6455 WebSocket Upgrade on the same HTTP server
-  server.on('upgrade', (req, socket, head) => {
-    const key = req.headers['sec-websocket-key'];
-    if (!key) {
-      socket.destroy();
-      return;
-    }
+  const wss = new WebSocketServer({ server });
 
-    const acceptKey = crypto
-      .createHash('sha1')
-      .update(key + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11')
-      .digest('base64');
+  wss.on('connection', (socket) => {
+    socket.isAlive = true;
+    socket.on('pong', () => { socket.isAlive = true; });
 
-    socket.write(
-      'HTTP/1.1 101 Switching Protocols\r\n' +
-      'Upgrade: websocket\r\n' +
-      'Connection: Upgrade\r\n' +
-      `Sec-WebSocket-Accept: ${acceptKey}\r\n\r\n`
-    );
-
-    let incomingBuffer = Buffer.alloc(0);
-
-    socket.on('data', chunk => {
-      incomingBuffer = Buffer.concat([incomingBuffer, chunk]);
-      const { messages, remaining } = decodeFrames(incomingBuffer);
-      incomingBuffer = remaining;
-
-      for (const msg of messages) {
-        if (msg.type === 'text') {
-          try {
-            const data = JSON.parse(msg.text);
-            handleClientMessage(socket, data);
-          } catch (err) {
-            console.error('[!] Invalid JSON received:', err.message);
-          }
-        } else if (msg.type === 'ping') {
-          try { socket.write(Buffer.from([0x8a, 0x00])); } catch {}
-        } else if (msg.type === 'close') {
-          roomManager.handleDisconnect(socket);
-          socket.end();
-        }
+    socket.on('message', (message) => {
+      try {
+        const data = JSON.parse(message.toString());
+        handleClientMessage(socket, data);
+      } catch (err) {
+        console.error('[!] Invalid JSON received:', err.message);
       }
     });
 
@@ -129,6 +101,20 @@ app.prepare().then(() => {
       roomManager.handleDisconnect(socket);
     });
   });
+
+  const pingInterval = setInterval(() => {
+    for (const client of wss.clients) {
+      if (client.isAlive === false) {
+        roomManager.handleDisconnect(client);
+        try { client.terminate(); } catch {}
+        continue;
+      }
+      client.isAlive = false;
+      try { client.ping(); } catch {}
+    }
+  }, 25000);
+
+  wss.on('close', () => clearInterval(pingInterval));
 
   // 30 FPS Multi-Room Telemetry & AI Bot Loop
   setInterval(() => {

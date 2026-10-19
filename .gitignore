@@ -24,3 +24,6 @@ yarn-error.log*
 # OS files
 .DS_Store
 Thumbs.db
+
+# Local runtime data
+data/high_scores.json
